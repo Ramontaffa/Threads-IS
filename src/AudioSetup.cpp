@@ -1,5 +1,55 @@
-#include "AudioState.h"
-//#include "minimp3.h"
+#include "AudioSetup.h"
+#include <iostream>
+#include <fstream>
+#include <string>
+#include <algorithm>
+#include <cstring>
+
+#define MINIMP3_IMPLEMENTATION
+#define MINIMP3_FLOAT_OUTPUT
+#include "minimp3.h"
+
+bool decode_mp3_to_pcm(const std::string& filename, std::vector<float>& pcm_buffer, 
+                       int& outChannels, int& outSampleRate) {
+    mp3dec_t mp3d;
+    mp3dec_init(&mp3d);
+
+    std::ifstream ifs(filename, std::ios::binary);
+    if (!ifs) {
+        std::cerr << "Falha ao ler arquivo: " << filename << "\n";
+        return false;
+    }
+
+    std::vector<uint8_t> input_mp3_buffer(16 * 1024); 
+    size_t bytes_read = 0;
+    
+    while (true) {
+        ifs.read(reinterpret_cast<char*>(input_mp3_buffer.data() + bytes_read), input_mp3_buffer.size() - bytes_read);
+        size_t new_bytes = ifs.gcount();
+        bytes_read += new_bytes;
+
+        if (new_bytes == 0 && bytes_read == 0) break; // Fim do arquivo
+
+        mp3dec_frame_info_t info;
+        float pcm_output[MINIMP3_MAX_SAMPLES_PER_FRAME]; 
+        
+        int samples_decoded = mp3dec_decode_frame(&mp3d, input_mp3_buffer.data(), bytes_read, pcm_output, &info);
+
+        if (samples_decoded > 0) {
+            pcm_buffer.insert(pcm_buffer.end(), pcm_output, pcm_output + samples_decoded * info.channels);
+            outChannels = info.channels;
+            outSampleRate = info.hz;
+        }
+
+        if (info.frame_bytes > 0) {
+            bytes_read -= info.frame_bytes;
+            std::memmove(input_mp3_buffer.data(), input_mp3_buffer.data() + info.frame_bytes, bytes_read);
+        } else {
+            if (new_bytes == 0) break; 
+        }
+    }
+    return true;
+}
 
 /*
 TO DO:
@@ -12,82 +62,52 @@ TO DO:
         - inicializar estado das faixas
 */
 void audioSetup(AudioState* state) {
+    // Lista de arquivos para carregar (mudar depois)
+    std::vector<std::string> fileNames = {
+        "track1.mp3",
+        "track2.mp3",
+        "track3.mp3"
+    };
 
-    int numTracks = 10;
-    for (int i = 0; i < numTracks; ++i) {
+    size_t maxFrames = 0;
+
+    for (const auto& filename : fileNames) {
         Track track;
-
-        // Inicializar com dados de verdade (aqui inicializando com 0)
-        track.pcmData.resize(state->totalFrames * state->channels, 0.0f);
-
-        // Inicializa faixa como mudo
         track.isPlaying.store(false, std::memory_order_relaxed);
 
-        state->tracks.push_back(std::move(track));
-    }
-}
+        int fileChannels = 0;
+        int fileSampleRate = 0;
 
-/*
-#define MINIMP3_IMPLEMENTATION
-#include "minimp3.h""
-#include <cstdio>
-#include <vector>
-#include <fstream>
-#include <iostream>
-#define MINIMP3_FLOAT_OUPUT
-
-std::vector<float> pcm_data = decode_mp3_to_pcm("mymp3File.mp3");
-
-stf::vector<float> decode_mp3_to_pcm(const* filename) {
-    mp3_dec_t mp3d;
-    mp3_dec_init(&mp3d);;
-
-    std::ifstream ifs(filename, std::ios::binary);
-
-    if (!ifs) {
-        std::cout << "Falha ao ler arquivo " << filename << "\n";
-        return {};
-    }
-    std::vector<float> pcm_buffer;
-
-    // An MP3 frame size is typically around 16KB for reliable sync
-    std::vector<uint8_t> input_mp3_buffer(16 * 1024); 
-    size_t bytes_read = 0;
-    
-    // Decoding loop
-    while (true) {
-        // Read a chunk of MP3 data from file
-        ifs.read(reinterpret_cast<char*>(input_mp3_buffer.data() + bytes_read), input_mp3_buffer.size() - bytes_read);
-        size_t new_bytes = ifs.gcount();
-        bytes_read += new_bytes;
-
-        if (new_bytes == 0 && bytes_read == 0) break; // End of file
-
-        mp3dec_frame_info_t info;
-        // Output buffer for PCM samples (max 1152 samples per frame * 2 channels)
-        short pcm_output[1152 * 2]; 
+        std::cout << "Carregando " << filename << "... ";
         
-        // Decode the frame
-        int samples_decoded = mp3dec_decode_frame(&mp3d, input_mp3_buffer.data(), bytes_read, pcm_output, &info);
+        if (decode_mp3_to_pcm(filename, track.pcmData, fileChannels, fileSampleRate)) {
+            std::cout << "Sucesso! (" << track.pcmData.size() / fileChannels << " frames)\n";
+            
+            // Por segurança, passa quantidade de canais (todas devem ser stereo)
+            if (state->tracks.empty()) {
+                state->channels = fileChannels;
+            }
 
-        if (samples_decoded > 0) {
-            // Append the decoded PCM data to the output buffer
-            pcm_buffer.insert(pcm_buffer.end(), pcm_output, pcm_output + samples_decoded * info.channels);
-        }
+            // Armazena arquivo com maior quantidade de frames
+            size_t currentFrames = track.pcmData.size() / state->channels;
+            if (currentFrames > maxFrames) {
+                maxFrames = currentFrames;
+            }
 
-        if (info.frame_bytes > 0) {
-            // Remove the consumed bytes from the input buffer
-            bytes_read -= info.frame_bytes;
-            std::memmove(input_mp3_buffer.data(), input_mp3_buffer.data() + info.frame_bytes, bytes_read);
-        } else {
-            // Handle error or end of stream condition (e.g. need more data)
-            if (new_bytes == 0) break; // Reached end of file but couldn't decode
+            state->tracks.push_back(std::move(track));
         }
     }
 
-    // After the loop, the audio properties (sample rate, channels) are available in info or via mp3d.info
-    std::cout << "Decoded PCM: Sample Rate=" << mp3d.info.hz << ", Channels=" << mp3d.info.channels << ", Samples=" << pcm_buffer.size() << std::endl;
+    state->totalFrames = maxFrames;
 
-    return pcm_buffer;
+    // Se as faixas não tiverem o mesmo tamanho, adiciona silêncio
+    for (auto& track : state->tracks) {
+        size_t requiredSize = state->totalFrames * state->channels;
+        if (track.pcmData.size() < requiredSize) {
+            track.pcmData.resize(requiredSize, 0.0f);
+        }
+    }
+
+    std::cout << "Total de faixas carregadas: " << state->tracks.size() << "\n";
+    std::cout << "Total de frames globais: " << state->totalFrames << "\n";
 }
-*/

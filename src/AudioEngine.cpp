@@ -1,20 +1,16 @@
-//#include "RtAudio.h"
+#include "RtAudio.h"
 #include "AudioState.h"
 #include <iostream>
 
 RtAudio::StreamParameters parameters;
-RtAudio *dac = 0;
+RtAudio *dac = nullptr;
 unsigned int sampleRate;
 unsigned int bufferSize;
 
 void rtAudioSetup(AudioState* state) {
     state->channels = 2;
-    sampleRate = 44100; // Taxa padrão (em Hz)
+    sampleRate = 48000; // Taxa (em Hz) (192,00 kbit/s)
     bufferSize = 256;   // Cada buffer terá 256 samples
-
-    parameters.deviceId = dac.getDefaultOutputDevice();
-    parameters.nChannels = state->channels;
-    parameters.firstChannel = 0;    
 
     try {
         dac = new RtAudio();
@@ -22,21 +18,27 @@ void rtAudioSetup(AudioState* state) {
         error.printMessage();
         exit(EXIT_FAILURE);
     }
+
+    parameters.deviceId = dac->getDefaultOutputDevice();
+    parameters.nChannels = state->channels;
+    parameters.firstChannel = 0;
+    
 }
 
-// inicia stream passando funcao callback
 int startAudioStream(AudioState* state) {
-    if (dac.getDeviceCount() < 1) {
+
+    if (dac->getDeviceCount() < 1) {
         std::cout << "Sem dispositivos disponíveis!\n";
         return 1;
     }
 
     try {
         dac->openStream(&parameters, nullptr, RTAUDIO_FLOAT32,
-                        sampleRate, &bufferSize, &mixingCallback, (void *)&state);
+                        sampleRate, &bufferSize, &mixingCallback, (void *)state);
         std::cout << "Stream aberta com sucesso.\n";
 
         dac->startStream();
+        return 0;
     }
     catch (RtAudioError &e) {
         e.printMessage();
@@ -61,7 +63,6 @@ int stopAudioStream() {
     }
 
     delete dac;
-
     return erro;
 }
 
@@ -80,9 +81,9 @@ int mixingCallback(void *outputBuffer, void *inputBuffer, unsigned int nFrames,
         return 1;
     }
 
-    // itera todos os frames
+    // Itera todos os frames
     for (unsigned int i = 0; i < nFrames; i++) {
-        // Preenche com silencio se mudo ou se a faixa terminou
+        // Preenche com silêncio se mudo ou se a faixa terminou
         if (!state->globalPlay.load(std::memory_order_relaxed) || 
             state->currentFrame.load(std::memory_order_relaxed) >= state->totalFrames) {            
             for (unsigned int c = 0; c < state->channels; c++) {
@@ -91,19 +92,19 @@ int mixingCallback(void *outputBuffer, void *inputBuffer, unsigned int nFrames,
             continue;
         }
 
-        // frame atual
+        // Frame atual
         size_t frameIndex = state->currentFrame.load(std::memory_order_relaxed);
         
-        // popula faixas da esquerda e direita
+        //  Preenche dados dos canais esquerdo e direito
         for (unsigned int c = 0; c < state->channels; c++) {
-            // inicializa com silencio e sem faixas ativas
+            // Inicializa com silêncio e sem faixas ativas
             float mixedSample = 0.0f;
             int activeTracks = 0;
             
-            // calcula indice do frame correspondente (esquerda ou direita)
+            // Calcula índice do frame correspondente ao canal atual
             size_t sampleIndex = (frameIndex * state->channels) + c;
 
-            // adiciona frames de faixas ativas ao total
+            // Adiciona frames das faixas que estão ativas
             for (auto& track : state->tracks) {
                 if (track.isPlaying.load(std::memory_order_relaxed)) {
                     mixedSample += track.pcmData[sampleIndex];
@@ -111,16 +112,16 @@ int mixingCallback(void *outputBuffer, void *inputBuffer, unsigned int nFrames,
                 }
             }
 
-            // divide buffer por quantidade de faixas ativas (diminui volume para audio nao clippar)
+            // Divide total pela quantidade de faixas ativas (diminui volume para áudio nao clippar)
             if (activeTracks > 1) {
                 mixedSample /= static_cast<float>(activeTracks);
             }
 
-            // escreve no buffer da API e avança posicao do buffer
+            // Escreve no buffer da API e avança posição do buffer
             *out++ = mixedSample;
         }
 
-        // avanca cursor para proximo buffer
+        // Incrementa frame na struct 
         state->currentFrame.fetch_add(1, std::memory_order_relaxed);
     }
 
