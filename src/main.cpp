@@ -6,37 +6,48 @@
 #include "UIManager.h"
 
 int main() {
-    AudioState* state;
+    // Struct para guardar informações relevantes sobre o estado do áudio (acessada por múltiplas threads)
+    AudioState state;
 
-    std::cout << "Iniciando..." << std::endl;
+    std::cout << "Iniciando programa..." << std::endl;
 
     /*
-    Carrega arquivos mp3 na memória. Popula vetor de Tracks com dados PCM
-    Usar biblioteca minimp3 
+    TO DO:
+        Esta função deve carregar os arquivos mp3 na memória. 
+        Para tanto, ela deve popular o vetor de Tracks do struct AudioState 
+        com os dados PCM dos árquivos, usando a biblioteca minimp3. 
     */
     audioSetup(&state);
 
     /*
-    Define configuracoes da API
+        Inicializa instância da struct RtAudio, que abstrai a interface de áudio para o programa
     */
     rtAudioSetup(&state);
     
-    // inicia stream
+    /* 
+        Tenta inicializar stream. Se falhar, encerra programa.
+        Ao iniciar a stream, RtAudio instrui o SO a criar um thread de áudio dedicada.
+        Quando o DAC precisar de dados, o SO acorda a thread dedicada, que executa nossa função callback
+        para alimentar o buffer que é enviado ao DAC
+    */ 
     if (!startAudioStream(&state)) {
         return 1;
     }
 
-    // inicializa thread de ui
+    // Inicializa thread de UI
     std::thread uiThread(uiLoop, &state);
 
-    // espera a thread de ui encerrar
+    // Espera a thread de UI encerrar a execução
     if (uiThread.joinable()) {
         uiThread.join();
     }
 
-    //limpeza
-    std::cout << "Encerrando..." << std::endl;
-    stopAudioStream(); 
+    // Destrói instância de RtAudio e libera memória
+    std::cout << "Encerrando programa..." << std::endl;
+    if (stopAudioStream()) {
+        std::cout << "Erro ao fechar stream\n";
+        return 1;
+    } 
 
     return 0;
 }

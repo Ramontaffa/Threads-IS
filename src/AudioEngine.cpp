@@ -1,53 +1,73 @@
-#include "RtAudio.h"
-
+//#include "RtAudio.h"
+#include "AudioState.h"
+#include <iostream>
 
 RtAudio::StreamParameters parameters;
-RtAudio dac;
+RtAudio *dac = 0;
+unsigned int sampleRate;
+unsigned int bufferSize;
 
-// configuracoes iniciais
 void rtAudioSetup(AudioState* state) {
-    state.channels = 2;
-    unsigned int sampleRate = 44100; // hz
-    unsigned int bufferFrames = 256; // samples em cada buffer
-    // calcula quantidade total
-    state.totalFrames = sampleRate * audiolength;
+    state->channels = 2;
+    sampleRate = 44100; // Taxa padrão (em Hz)
+    bufferSize = 256;   // Cada buffer terá 256 samples
 
     parameters.deviceId = dac.getDefaultOutputDevice();
-    parameters.nChannels = state.channels;
+    parameters.nChannels = state->channels;
     parameters.firstChannel = 0;    
+
+    try {
+        dac = new RtAudio();
+    } catch (RtError &error) {
+        error.printMessage();
+        exit(EXIT_FAILURE);
+    }
 }
 
 // inicia stream passando funcao callback
 int startAudioStream(AudioState* state) {
-    try {
-        dac.openStream(&parameters, nullptr, RTAUDIO_FLOAT32,
-                       sampleRate, &bufferFrames, &mixingCallback, (void *)&state);
-        dac.startStream();
+    if (dac.getDeviceCount() < 1) {
+        std::cout << "Sem dispositivos disponíveis!\n";
+        return 1;
     }
-    catch (RtAudioError& e) {
+
+    try {
+        dac->openStream(&parameters, nullptr, RTAUDIO_FLOAT32,
+                        sampleRate, &bufferSize, &mixingCallback, (void *)&state);
+        std::cout << "Stream aberta com sucesso.\n";
+
+        dac->startStream();
+    }
+    catch (RtAudioError &e) {
         e.printMessage();
+        delete dac;
         return 1;
     }
 }
 
-// encerra stream
 int stopAudioStream() {
 
+    int erro = 0;
     try {
-        dac.stopStream();
+        dac->stopStream();
     }
     catch (RtAudioError& e) {
         e.printMessage();
+        erro = 1;
     }
     
-    if (dac.isStreamOpen()) {
-        dac.closeStream();
+    if (dac->isStreamOpen()) {
+        dac->closeStream();
     }
-    return 0;
+
+    delete dac;
+
+    return erro;
 }
 
-// callback para alimentar API
-// ver documentacao de RtAudio se dúvidas
+// =======================================
+// FUNÇÃO CALLBACK
+// =======================================
 int mixingCallback(void *outputBuffer, void *inputBuffer, unsigned int nFrames,
                    double streamTime, RtAudioStreamStatus status, void *userData) {
     
