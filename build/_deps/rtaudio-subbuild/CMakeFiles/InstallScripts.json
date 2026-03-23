@@ -1,7 +1,0 @@
-{
-	"InstallScripts" : 
-	[
-		"/Users/arthurcavalcanti/Documents/dev/audio-threads/build/_deps/rtaudio-subbuild/cmake_install.cmake"
-	],
-	"Parallel" : false
-}
