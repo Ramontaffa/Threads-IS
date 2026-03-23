@@ -8,14 +8,16 @@ unsigned int sampleRate;
 unsigned int bufferSize;
 
 void rtAudioSetup(AudioState* state) {
+    if (state->channels != 2) {
+        std::cout << "Erro ao fazer decoding. Faixas devem ser stereo\n";
+    }
     state->channels = 2;
     sampleRate = 48000; // Taxa (em Hz) (192,00 kbit/s)
     bufferSize = 256;   // Cada buffer terá 256 samples
 
     try {
         dac = new RtAudio();
-    } catch (RtError &error) {
-        error.printMessage();
+    } catch (RtAudioErrorType &error) {
         exit(EXIT_FAILURE);
     }
 
@@ -23,47 +25,6 @@ void rtAudioSetup(AudioState* state) {
     parameters.nChannels = state->channels;
     parameters.firstChannel = 0;
     
-}
-
-int startAudioStream(AudioState* state) {
-
-    if (dac->getDeviceCount() < 1) {
-        std::cout << "Sem dispositivos disponíveis!\n";
-        return 1;
-    }
-
-    try {
-        dac->openStream(&parameters, nullptr, RTAUDIO_FLOAT32,
-                        sampleRate, &bufferSize, &mixingCallback, (void *)state);
-        std::cout << "Stream aberta com sucesso.\n";
-
-        dac->startStream();
-        return 0;
-    }
-    catch (RtAudioError &e) {
-        e.printMessage();
-        delete dac;
-        return 1;
-    }
-}
-
-int stopAudioStream() {
-
-    int erro = 0;
-    try {
-        dac->stopStream();
-    }
-    catch (RtAudioError& e) {
-        e.printMessage();
-        erro = 1;
-    }
-    
-    if (dac->isStreamOpen()) {
-        dac->closeStream();
-    }
-
-    delete dac;
-    return erro;
 }
 
 // =======================================
@@ -127,3 +88,43 @@ int mixingCallback(void *outputBuffer, void *inputBuffer, unsigned int nFrames,
 
     return 0; // faz RtAudio continuar a rodar a stream
 }
+
+int startAudioStream(AudioState* state) {
+
+    if (dac->getDeviceCount() < 1) {
+        std::cout << "Sem dispositivos disponíveis!\n";
+        return 1;
+    }
+
+    try {
+        dac->openStream(&parameters, nullptr, RTAUDIO_FLOAT32,
+                        sampleRate, &bufferSize, &mixingCallback, (void *)state);
+        std::cout << "Stream aberta com sucesso.\n";
+
+        dac->startStream();
+        return 0;
+    }
+    catch (RtAudioErrorType &e) {
+        delete dac;
+        return 1;
+    }
+}
+
+int stopAudioStream() {
+
+    int erro = 0;
+    try {
+        dac->stopStream();
+    }
+    catch (RtAudioErrorType& e) {
+        erro = 1;
+    }
+    
+    if (dac->isStreamOpen()) {
+        dac->closeStream();
+    }
+
+    delete dac;
+    return erro;
+}
+

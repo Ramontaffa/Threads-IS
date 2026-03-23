@@ -8,6 +8,29 @@ struct Track {
     std::vector<float> pcmData;
     // Representa se a faixa está tocando
     std::atomic<bool> isPlaying{false};
+
+    // 1. Construtor padrão necessário porque vamos criar construtores customizados
+    Track() = default;
+
+    // 2. Construtor de Movimento (Move Constructor)
+    // Isso ensina o std::vector como mover uma Track na memória
+    Track(Track&& other) noexcept 
+        : pcmData(std::move(other.pcmData)), 
+          isPlaying(other.isPlaying.load(std::memory_order_relaxed)) {
+    }
+
+    // 3. Operador de Atribuição de Movimento (Move Assignment Operator)
+    Track& operator=(Track&& other) noexcept {
+        if (this != &other) {
+            pcmData = std::move(other.pcmData);
+            isPlaying.store(other.isPlaying.load(std::memory_order_relaxed), std::memory_order_relaxed);
+        }
+        return *this;
+    }
+
+    // 4. Deletar explicitamente as cópias para evitar acidentes de performance
+    Track(const Track&) = delete;
+    Track& operator=(const Track&) = delete;
 };
 
 struct AudioState {

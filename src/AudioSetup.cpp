@@ -62,11 +62,11 @@ TO DO:
         - inicializar estado das faixas
 */
 void audioSetup(AudioState* state) {
-    // Lista de arquivos para carregar (mudar depois)
+// Lista de arquivos para carregar
     std::vector<std::string> fileNames = {
-        "track1.mp3",
-        "track2.mp3",
-        "track3.mp3"
+        "assets/1_organ_lead_trimmed.mp3",
+        "assets/2_bass_trimmed.mp3",
+        "assets/4_kick_trimmed.mp3"
     };
 
     size_t maxFrames = 0;

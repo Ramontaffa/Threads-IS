@@ -1,0 +1,3 @@
+/Users/arthurcavalcanti/Documents/dev/audio-threads/build/_deps/rtaudio-subbuild/CMakeFiles/rtaudio-populate.dir
+/Users/arthurcavalcanti/Documents/dev/audio-threads/build/_deps/rtaudio-subbuild/CMakeFiles/edit_cache.dir
+/Users/arthurcavalcanti/Documents/dev/audio-threads/build/_deps/rtaudio-subbuild/CMakeFiles/rebuild_cache.dir

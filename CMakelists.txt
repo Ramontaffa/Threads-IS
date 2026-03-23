@@ -1,2 +1,54 @@
-// TO DO
-- definir aqui comandos para criar Makefile do projeto
+# Define the minimum CMake version required
+cmake_minimum_required(VERSION 3.15)
+
+# Name your project and specify that it uses C++
+project(AUDIO-THREADS CXX)
+
+# Require C++17 standard (great for std::atomic and std::thread)
+set(CMAKE_CXX_STANDARD 17)
+set(CMAKE_CXX_STANDARD_REQUIRED ON)
+
+# -------------------------------------------------------------------
+# 1. Fetch and configure RtAudio automatically
+# -------------------------------------------------------------------
+include(FetchContent)
+
+message(STATUS "Downloading and configuring RtAudio...")
+FetchContent_Declare(
+    rtaudio
+    GIT_REPOSITORY https://github.com/thestk/rtaudio.git
+    GIT_TAG        6.0.1 # Use a stable release version
+)
+# This command downloads RtAudio and makes its targets available to us
+FetchContent_MakeAvailable(rtaudio)
+
+# -------------------------------------------------------------------
+# 2. Define our executable and its source files
+# -------------------------------------------------------------------
+add_executable(AUDIO-THREADS
+    src/main.cpp
+    src/AudioEngine.cpp
+    src/AudioSetup.cpp
+    src/UIManager.cpp
+    src/Visualizador.cpp
+)
+
+# -------------------------------------------------------------------
+# 3. Tell the compiler where to find our .h header files
+# -------------------------------------------------------------------
+target_include_directories(AUDIO-THREADS PRIVATE include)
+
+# -------------------------------------------------------------------
+# 4. Link the libraries to our executable
+# -------------------------------------------------------------------
+# Find the system's threading library (required for std::thread)
+find_package(Threads REQUIRED)
+
+# Link RtAudio and the Threading library to our executable
+target_link_libraries(AUDIO-THREADS 
+    PRIVATE 
+    rtaudio
+    Threads::Threads
+)
+# Copy the assets folder to the build directory during configuration
+file(COPY assets DESTINATION ${CMAKE_CURRENT_BINARY_DIR})

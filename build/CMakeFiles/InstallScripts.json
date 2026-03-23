@@ -1,0 +1,9 @@
+{
+	"InstallScripts" : 
+	[
+		"/Users/arthurcavalcanti/Documents/dev/audio-threads/build/cmake_install.cmake",
+		"/Users/arthurcavalcanti/Documents/dev/audio-threads/build/_deps/rtaudio-build/cmake_install.cmake",
+		"/Users/arthurcavalcanti/Documents/dev/audio-threads/build/_deps/rtaudio-build/tests/cmake_install.cmake"
+	],
+	"Parallel" : false
+}
