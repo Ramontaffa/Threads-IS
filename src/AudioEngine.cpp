@@ -73,6 +73,7 @@ int mixingCallback(void *outputBuffer, void *inputBuffer, unsigned int nFrames,
                 }
             }
 
+            // MUITO BAIXO, AJUSTAR !
             // Divide total pela quantidade de faixas ativas (diminui volume para áudio nao clippar)
             if (activeTracks > 1) {
                 mixedSample /= static_cast<float>(activeTracks);
@@ -96,27 +97,35 @@ int startAudioStream(AudioState* state) {
         return 1;
     }
 
-    try {
-        dac->openStream(&parameters, nullptr, RTAUDIO_FLOAT32,
-                        sampleRate, &bufferSize, &mixingCallback, (void *)state);
-        std::cout << "Stream aberta com sucesso.\n";
-
-        dac->startStream();
-        return 0;
-    }
-    catch (RtAudioErrorType &e) {
-        delete dac;
+    RtAudioErrorType err = dac->openStream(&parameters, nullptr, RTAUDIO_FLOAT32,
+                                           sampleRate, &bufferSize, &mixingCallback, (void *)state);
+    
+ 
+    if (err != RTAUDIO_NO_ERROR) {
+        std::cerr << "\n[ERRO CRÍTICO] Falha no openStream: " << dac->getErrorText() << std::endl;
         return 1;
     }
+
+    std::cout << "Stream aberta com sucesso.\n";
+
+  
+    err = dac->startStream();
+    
+    if (err != RTAUDIO_NO_ERROR) {
+        std::cerr << "\n[ERRO CRÍTICO] Falha no startStream: " << dac->getErrorText() << std::endl;
+        return 1;
+    }
+
+    return 0; 
 }
 
 int stopAudioStream() {
-
     int erro = 0;
-    try {
-        dac->stopStream();
-    }
-    catch (RtAudioErrorType& e) {
+    
+    // Captura o erro em vez de usar try/catch
+    RtAudioErrorType err = dac->stopStream();
+    if (err != RTAUDIO_NO_ERROR) {
+        std::cerr << "Erro ao parar stream: " << dac->getErrorText() << "\n";
         erro = 1;
     }
     
@@ -127,4 +136,3 @@ int stopAudioStream() {
     delete dac;
     return erro;
 }
-

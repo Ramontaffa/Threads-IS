@@ -30,7 +30,8 @@ int main() {
         Quando o DAC precisar de dados, o SO acorda a thread dedicada, que executa nossa função callback
         para alimentar o buffer que é enviado ao DAC
     */ 
-    if (!startAudioStream(&state)) {
+    if (startAudioStream(&state) != 0) {
+        std::cout << "Falha ao iniciar o motor de áudio. Encerrando...\n";
         return 1;
     }
 

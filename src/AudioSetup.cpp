@@ -66,7 +66,12 @@ void audioSetup(AudioState* state) {
     std::vector<std::string> fileNames = {
         "assets/1_organ_lead_trimmed.mp3",
         "assets/2_bass_trimmed.mp3",
-        "assets/4_kick_trimmed.mp3"
+        "assets/4_kick_trimmed.mp3",
+        "assets/5_snare_trimmed.mp3",
+        "assets/6_hh_trimmed.mp3",
+        "assets/7_wavering_synth_trimmed.mp3",
+        "assets/9_organ_trimmed.mp3",
+        "assets/10_bg_synth_trimmed.mp3",
     };
 
     size_t maxFrames = 0;
