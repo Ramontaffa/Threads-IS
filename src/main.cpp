@@ -4,6 +4,9 @@
 #include "AudioSetup.h"
 #include "AudioEngine.h"
 #include "UIManager.h"
+#ifdef AUDIO_THREADS_ENABLE_GUI
+#include "GuiManager.h"
+#endif
 
 int main() {
     // Struct para guardar informações relevantes sobre o estado do áudio (acessada por múltiplas threads)
@@ -35,13 +38,21 @@ int main() {
         return 1;
     }
 
-    // Inicializa thread de UI
+#ifdef AUDIO_THREADS_ENABLE_GUI
+    // GUI em janela como interface principal. Se falhar, usa fallback terminal.
+    if (!runGui(&state)) {
+        std::cout << "Falha ao inicializar GUI. Voltando para modo terminal...\n";
+        std::thread uiThread(uiLoop, &state);
+        if (uiThread.joinable()) {
+            uiThread.join();
+        }
+    }
+#else
     std::thread uiThread(uiLoop, &state);
-
-    // Espera a thread de UI encerrar a execução
     if (uiThread.joinable()) {
         uiThread.join();
     }
+#endif
 
     // Destrói instância de RtAudio e libera memória
     std::cout << "Encerrando programa..." << std::endl;

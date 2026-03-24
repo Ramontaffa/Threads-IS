@@ -19,3 +19,6 @@ compile_commands.json
 *.dll
 *.lib
 *.exe
+
+# GUI runtime settings
+imgui.ini

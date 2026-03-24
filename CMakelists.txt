@@ -8,6 +8,8 @@ project(AUDIO-THREADS CXX)
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
+option(AUDIO_THREADS_ENABLE_GUI "Build with Dear ImGui + GLFW UI" ON)
+
 # -------------------------------------------------------------------
 # 1. Fetch and configure RtAudio automatically
 # -------------------------------------------------------------------
@@ -22,6 +24,51 @@ FetchContent_Declare(
 # This command downloads RtAudio and makes its targets available to us
 FetchContent_MakeAvailable(rtaudio)
 
+if(AUDIO_THREADS_ENABLE_GUI)
+    message(STATUS "Downloading and configuring GUI dependencies (GLFW + Dear ImGui)...")
+
+    if(UNIX AND NOT APPLE)
+        set(GLFW_BUILD_WAYLAND OFF CACHE BOOL "" FORCE)
+        set(GLFW_BUILD_X11 ON CACHE BOOL "" FORCE)
+    endif()
+
+    FetchContent_Declare(
+        glfw
+        GIT_REPOSITORY https://github.com/glfw/glfw.git
+        GIT_TAG        3.4
+    )
+
+    FetchContent_Declare(
+        imgui
+        GIT_REPOSITORY https://github.com/ocornut/imgui.git
+        GIT_TAG        v1.91.9b
+    )
+
+    FetchContent_MakeAvailable(glfw imgui)
+    find_package(OpenGL REQUIRED)
+
+    add_library(imgui_lib STATIC
+        ${imgui_SOURCE_DIR}/imgui.cpp
+        ${imgui_SOURCE_DIR}/imgui_draw.cpp
+        ${imgui_SOURCE_DIR}/imgui_tables.cpp
+        ${imgui_SOURCE_DIR}/imgui_widgets.cpp
+        ${imgui_SOURCE_DIR}/backends/imgui_impl_glfw.cpp
+        ${imgui_SOURCE_DIR}/backends/imgui_impl_opengl3.cpp
+    )
+
+    target_include_directories(imgui_lib
+        PUBLIC
+        ${imgui_SOURCE_DIR}
+        ${imgui_SOURCE_DIR}/backends
+    )
+
+    target_link_libraries(imgui_lib
+        PUBLIC
+        glfw
+        OpenGL::GL
+    )
+endif()
+
 # -------------------------------------------------------------------
 # 2. Define our executable and its source files
 # -------------------------------------------------------------------
@@ -32,6 +79,11 @@ add_executable(AUDIO-THREADS
     src/UIManager.cpp
     src/Visualizador.cpp
 )
+
+if(AUDIO_THREADS_ENABLE_GUI)
+    target_sources(AUDIO-THREADS PRIVATE src/GuiManager.cpp)
+    target_compile_definitions(AUDIO-THREADS PRIVATE AUDIO_THREADS_ENABLE_GUI=1)
+endif()
 
 # -------------------------------------------------------------------
 # 3. Tell the compiler where to find our .h header files
@@ -50,5 +102,9 @@ target_link_libraries(AUDIO-THREADS
     rtaudio
     Threads::Threads
 )
+
+if(AUDIO_THREADS_ENABLE_GUI)
+    target_link_libraries(AUDIO-THREADS PRIVATE imgui_lib)
+endif()
 # Copy the assets folder to the build directory during configuration
 file(COPY assets DESTINATION ${CMAKE_CURRENT_BINARY_DIR})
