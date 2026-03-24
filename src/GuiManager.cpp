@@ -4,6 +4,9 @@
 #include "backends/imgui_impl_glfw.h"
 #include "backends/imgui_impl_opengl3.h"
 
+#include <iostream>
+#include <cerrno>
+
 #ifdef __APPLE__
     #include <OpenGL/gl.h>
 #else
@@ -32,10 +35,13 @@ size_t countActiveTracks(AudioState* state) {
 
 bool runGui(AudioState* state) {
     if (state == nullptr) {
+        std::cerr << "[DEBUG] AudioState é nullptr!" << std::endl;
         return false;
     }
 
+    std::cerr << "[DEBUG] Iniciando GLFW..." << std::endl;
     if (!glfwInit()) {
+        std::cerr << "[DEBUG] ERRO: glfwInit() falhou!" << std::endl;
         return false;
     }
 
@@ -43,12 +49,15 @@ bool runGui(AudioState* state) {
     glfwWindowHint(GLFW_CONTEXT_VERSION_MAJOR, 4);
     glfwWindowHint(GLFW_CONTEXT_VERSION_MINOR, 1);
 
+    std::cerr << "[DEBUG] Criando janela GLFW..." << std::endl;
     GLFWwindow* window = glfwCreateWindow(1180, 720, "AUDIO-THREADS | DJ Interface", nullptr, nullptr);
     if (window == nullptr) {
+        std::cerr << "[DEBUG] ERRO: glfwCreateWindow() falhou!" << std::endl;
         glfwTerminate();
         return false;
     }
 
+    std::cerr << "[DEBUG] Janela criada com sucesso. Inicializando contexto OpenGL..." << std::endl;
     glfwMakeContextCurrent(window);
     glfwSwapInterval(1);
 
@@ -59,20 +68,26 @@ bool runGui(AudioState* state) {
 
     ImGui::StyleColorsDark();
 
+    std::cerr << "[DEBUG] Inicializando ImGui para GLFW+OpenGL..." << std::endl;
     if (!ImGui_ImplGlfw_InitForOpenGL(window, true)) {
+        std::cerr << "[DEBUG] ERRO: ImGui_ImplGlfw_InitForOpenGL() falhou!" << std::endl;
         ImGui::DestroyContext();
         glfwDestroyWindow(window);
         glfwTerminate();
         return false;
     }
 
+    std::cerr << "[DEBUG] Inicializando ImGui OpenGL3 backend com GLSL versão: " << glslVersion << std::endl;
     if (!ImGui_ImplOpenGL3_Init(glslVersion)) {
+        std::cerr << "[DEBUG] ERRO: ImGui_ImplOpenGL3_Init() falhou!" << std::endl;
         ImGui_ImplGlfw_Shutdown();
         ImGui::DestroyContext();
         glfwDestroyWindow(window);
         glfwTerminate();
         return false;
     }
+
+    std::cerr << "[DEBUG] ImGui inicializado com sucesso!" << std::endl;
 
     while (!glfwWindowShouldClose(window) && state->programRunning.load(std::memory_order_relaxed)) {
         glfwPollEvents();

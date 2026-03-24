@@ -181,6 +181,85 @@ include/minimp3.h      → Decodificador MP3
 
 ---
 
+## ⚠️ Troubleshooting & Debug
+
+### ImGui não está abrindo (ou fica aberto em modo terminal)
+
+Se você rodou `./build/AUDIO-THREADS` e a janela gráfica não apareceu, o programa automaticamente caiu para **modo terminal fallback**. Isso é normal em alguns ambientes.
+
+#### 🔍 Modo Debug com Mensagens Verbosas
+
+Para descobrir **exatamente onde** a inicialização do ImGui está falhando:
+
+**1. Limpe build anterior:**
+```bash
+rm -rf build
+```
+
+**2. Recompile com debug:**
+```bash
+cmake -S . -B build
+cmake --build build -j
+```
+
+**3. Rode capturando stderr (onde logs de debug vão):**
+```bash
+./build/AUDIO-THREADS 2>&1 | grep -E "DEBUG|ERRO" | head -20
+```
+
+**Ou veja tudo:**
+```bash
+./build/AUDIO-THREADS 2>&1 | head -50
+```
+
+#### Mensagens de Debug esperadas:
+
+✅ Se funcionar:
+```
+[DEBUG] Iniciando GLFW...
+[DEBUG] Criando janela GLFW...
+[DEBUG] Janela criada com sucesso. Inicializando contexto OpenGL...
+[DEBUG] Inicializando ImGui para GLFW+OpenGL...
+[DEBUG] Inicializando ImGui OpenGL3 backend com GLSL versão: #version 410
+[DEBUG] ImGui inicializado com sucesso!
+```
+
+❌ Se falhar, procure por `ERRO:` para identificar:
+- **`glfwInit() falhou`** → Problema com GLFW/display
+- **`glfwCreateWindow() falhou`** → Sem acesso a janelas gráficas
+- **`ImGui_ImplGlfw_InitForOpenGL() falhou`** → Problema com ImGui setup
+- **`ImGui_ImplOpenGL3_Init() falhou`** → Problema com contexto OpenGL
+
+#### Soluções comuns por SO:
+
+**macOS:**
+- Certifique-se que GLFW e OpenGL estão disponíveis (ambos nativos)
+- Se em **headless mode** (sem tela), use `-DAUDIO_THREADS_ENABLE_GUI=OFF`
+
+**Linux/WSL:**
+- Instale dependências gráficas:
+  ```bash
+  sudo apt-get install libgl1-mesa-dev libxrandr-dev libxinerama-dev libxcursor-dev
+  ```
+- Se em **X11 forwarding remoto**, use `-DAUDIO_THREADS_ENABLE_GUI=OFF`
+
+**Windows/WSL:**
+- WSL1 não tem suporte direto a gráficos; use WSL2 com **X Server (vcxsrv)** instalado
+- Ou simplesmente use modo CLI com `-DAUDIO_THREADS_ENABLE_GUI=OFF`
+
+#### Fallback automático:
+
+Se ImGui falhar mesmo assim, o programa automaticamente usa **interface em terminal** (UIManager.cpp). Funciona perfeitamente!
+
+Para forçar modo terminal sem tentar ImGui:
+```bash
+cmake -S . -B build -DAUDIO_THREADS_ENABLE_GUI=OFF
+cmake --build build -j
+./build/AUDIO-THREADS
+```
+
+---
+
 ## Conceitos-Chave: Threads, Concorrência e Paralelismo
 
 Para entender este projeto profundamente, consulte o documento `THREADS_EXPLICACAO.docx` que detalha:
