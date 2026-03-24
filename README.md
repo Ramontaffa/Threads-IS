@@ -183,6 +183,7 @@ src/AudioSetup.cpp     → Carregamento de arquivos MP3
 src/AudioEngine.cpp    → RtAudio setup e callback de mixagem
 src/GuiManager.cpp     → UI gráfica (ImGui + GLFW)
 src/UIManager.cpp      → UI terminal (fallback)
+src/StatusMonitor.cpp  → Funções helper (formatTime, renderProgressBar)
 src/Visualizador.cpp   → (A ser preenchido)
 
 include/AudioState.h   → Estruturas compartilhadas e atomics
@@ -190,7 +191,118 @@ include/AudioEngine.h  → Funções de áudio
 include/AudioSetup.h   → Funções de setup
 include/GuiManager.h   → Interface gráfica
 include/UIManager.h    → Interface terminal
+include/StatusMonitor.h → Funções helper de formatação
 include/minimp3.h      → Decodificador MP3
+```
+
+---
+
+## 🎨 Interface Gráfica (ImGui)
+
+### Arquitetura da UI
+
+A interface gráfica é composta por 3 camadas principais:
+
+#### 1️⃣ Master Control Panel (Topo)
+- **Altura**: ~100px
+- **Componentes**:
+  - Botão **PLAY/PAUSE** (variável, verde quando tocando): ativa/desativa playback global
+  - Botão **RESET**: volta ao frame 0
+  - **Status em tempo real**: mostra "PLAYING" ou "PAUSED"
+  - **Frame counter**: exibe frame atual vs total
+  - **Barra de progresso**: visualização percentual (atualizada via `currentFrame` atômico)
+- **Responsabilidade**: controle global do mixer
+- **Threading**: Modifica `state->globalPlay` e `state->currentFrame` (atomics, thread-safe)
+
+#### 2️⃣ Aba "Mixer"
+- **Layout**: Grid 4x2 (4 botões por linha, 2 linhas = 8 tracks)
+- **Cada botão de faixa**:
+  - **Tamanho**: 270px width × 60px height
+  - **Cores dinâmicas**:
+    - ✅ **Verde [+]** quando `isPlaying == true` (tonalidade: RGB 50,150,80)
+    - ⬜ **Cinza [ ]** quando `isPlaying == false` (tonalidade: RGB 60,60,70)
+  - **Label**: `TrackName + " [ON]"` ou `" [OFF]"`
+  - **Clique**: Alterna `state->tracks[i].isPlaying` (atomic toggle)
+- **Responsabilidade**: controle individual de tracks de áudio
+- **Atualização**: Buttons lêem estado atômico, renderizam cor diferente
+- **Threading**: thread de UI (ImGui) lê atomics, audio callback lê atomics (lock-free)
+
+#### 3️⃣ Aba "Status Details"
+- **Layout**: Tabela ImGui com 4 colunas:
+  1. **Track Name** (200px): nome da faixa
+  2. **Status** (150px): mostra "[+] ACTIVE" (verde) ou "[ ] MUTED" (cinza)
+  3. **Progress** (stretch): barra visual em escala 0-100%
+  4. **Time** (100px): tempo formatado via `formatTime()`
+- **Dados dinâmicos** (lidos a cada frame):
+  - `trackName`: string estática (carregada em setup)
+  - `isPlaying`: boolean atômico (colorido em tempo real)
+  - `currentFrame / totalFrames`: progress ratio (atômica, atualizada por audio thread)
+  - `formatTime(currentFrame, sampleRate)`: retorna "mm:ss" (ex: "01:23")
+- **Responsabilidade**: monitorar status detalhado de cada track
+
+### Helper Functions (StatusMonitor.h/.cpp)
+
+Para manter a UI limpa, usamos funções utilitárias:
+
+**`std::string formatTime(size_t frames, uint32_t sampleRate)`**
+- **Entrada**: número de frames (uint) e taxa de amostragem (ex: 44100 Hz)
+- **Saída**: string formatada "mm:ss" (ex: "03:45")
+- **Exemplo**: 176400 frames @ 44100 Hz = 4 segundos = "00:04"
+- **Uso**: Renderizar tempo em Status Details
+
+**`std::string renderProgressBar(size_t current, size_t total, int width)`**
+- **Entrada**: frame atual, total de frames, largura desejada (ex: 40 chars)
+- **Saída**: barra ASCII (ex: "================================----" para 87% progress)
+- **Uso**: Renderizar progresso em modo terminal (fallback CLI)
+
+### Atualização em Tempo Real
+
+A UI se atualiza **automaticamente** a cada frame do loop ImGui:
+
+```cpp
+while (!glfwWindowShouldClose(window) && state->programRunning) {
+    glfwPollEvents();
+    ImGui_ImplOpenGL3_NewFrame();
+    ImGui_ImplGlfw_NewFrame();
+    ImGui::NewFrame();
+    
+    // Lê atomics de forma thread-safe
+    bool isMasterPlaying = state->globalPlay.load(std::memory_order_relaxed);
+    size_t currentFrame = state->currentFrame.load(std::memory_order_relaxed);
+    
+    // Renderiza com valores atuais
+    ImGui::Text("Time: %zu / %zu", currentFrame, state->totalFrames);
+    
+    ImGui::Render();
+    // ... swap buffers
+}
+```
+
+**Características**:
+- ⚡ **Lock-free**: Usa `std::atomic` sem mutex (máxima performance)
+- 🔄 **Não-bloqueante**: Audio thread nunca espera por UI
+- 📊 **Sincronização implícita**: Memory ordering garante consistência
+- 🎯 **60 FPS**: ImGui roda ~60 vezes/segundo (sincronizado com glfwSwapInterval)
+
+### Como a Audio Thread Atualiza a UI
+
+**Sem comunicação direta!** A estratégia é:
+
+1. **Audio callback** (callback thread) incrementa `state->currentFrame` em cada bloco de áudio
+2. **UI loop** (ImGui thread) lê `state->currentFrame` a cada frame
+3. **Não há locks**: `std::atomic` com `memory_order_relaxed` é suficiente
+
+Exemplo:
+```cpp
+// Em GuiManager.cpp
+size_t currentFrame = state->currentFrame.load(std::memory_order_relaxed);
+ImGui::ProgressBar(currentFrame / (float)state->totalFrames);
+
+// Em AudioEngine.cpp (callback, outra thread)
+for (size_t i = 0; i < frameCount; i++) {
+    // ... mixar áudio ...
+    state->currentFrame.store(state->currentFrame.load() + 1, std::memory_order_relaxed);
+}
 ```
 
 ---
@@ -276,12 +388,14 @@ cmake --build build -j
 
 ## Conceitos-Chave: Threads, Concorrência e Paralelismo
 
-Para entender este projeto profundamente, consulte o documento `THREADS_EXPLICACAO.docx` que detalha:
+Para entender este projeto profundamente, consulte o documento [`THREADS_EXPLICACAO.md`](THREADS_EXPLICACAO.md) que detalha:
 
-- **Paralelismo real** vs **Concorrência lógica**
-- **Mutex vs Atomic**: Por que não usamos lock aqui
+- **Paralelismo real** vs **Concorrência lógica**: Como 3 threads rodam simultaneamente
+- **Mutex vs Atomic**: Por que não usamos lock (e como atomics evitam glitches)
 - **Memory Ordering**: `memory_order_relaxed` e quando usar
-- **Real-time audio constraints**: Latência e jitter
-- **Race conditions**: Como evitamos neste projeto
-- **Producer-Consumer pattern**: Aplicado em áudio
-- **Lock-free programming**: Técnicas usadas
+- **Real-time audio constraints**: Latência (<100ms) e jitter (zero para áudio perfeito)
+- **Race conditions**: Como as evitamos com atomics e read-only separation
+- **Producer-Consumer pattern**: UI thread (producer) e audio callback (consumer)
+- **Lock-free programming**: Técnicas usadas para máxima performance
+
+**📖 Recomendação**: Leia este documento para entender a **arquitetura completa** do projeto!
