@@ -140,6 +140,6 @@ void uiLoop(AudioState* state) {
             continue;
         }
 
-        printDashboard(state);
+        // Ignore other keys
     }
 }

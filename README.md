@@ -31,24 +31,38 @@ wsl -d Ubuntu -- bash -lc "sudo apt-get update && sudo apt-get install cmake bui
 
 #### 🎨 Modo 1: Com ImGui (GUI Gráfica) - **PADRÃO**
 
+**IMPORTANTE:** Para ativar a GUI gráfica, use a flag `-DAUDIO_THREADS_ENABLE_GUI=ON`:
+
 **Em uma linha (compile + execute):**
 ```bash
-cmake -S . -B build && cmake --build build -j && ./build/AUDIO-THREADS
+cmake -S . -B build -DAUDIO_THREADS_ENABLE_GUI=ON && cmake --build build -j && ./build/AUDIO-THREADS
 ```
 
 **Ou em etapas:**
 ```bash
-cmake -S . -B build          # 1. Configurar projeto
-cmake --build build -j       # 2. Compilar com ImGui (padrão)
-./build/AUDIO-THREADS        # 3. Executa com janela gráfica
+cmake -S . -B build -DAUDIO_THREADS_ENABLE_GUI=ON   # 1. Configurar projeto COM GUI
+cmake --build build -j                               # 2. Compilar com ImGui
+./build/AUDIO-THREADS                                # 3. Executa com janela gráfica
 ```
 
-**Resultado:** Janela gráfica com:
-- Botões de **Play/Pause** global e **Reset Timeline**
-- **8 botões de tracks** com cores (azul=OFF, verde=ON) para ativar/desativar
-- **Barra de progresso** em tempo real (amarela)
-- **Contador de frames** mostrando progresso (Frame: X / Y)
-- Status: TOCANDO ou PAUSADO
+**Se já compilou sem GUI e quer ativar agora:**
+```bash
+rm -rf build                                          # Limpar cache
+cmake -S . -B build -DAUDIO_THREADS_ENABLE_GUI=ON   # Reconfigurar COM GUI
+cmake --build build -j
+./build/AUDIO-THREADS
+```
+
+**Resultado esperado:** Janela gráfica com:
+- **Master Control Panel** no topo com botões Play/Pause e Reset
+- **Abas (Tabs):**
+  - `Mixer`: 8 botões de tracks com cores (cinza=OFF, verde=ON)
+  - `Status Details`: Tabela com status detalhado de cada track
+- **Barras de progresso** em tempo real com percentual
+- **Asset name** e **Sample rate** exibidos
+
+**⚠️ Se abrir em terminal mesmo com GUI ativado:**
+Significa que a inicialização do ImGui falhou (OpenGL/GLFW). Veja a seção **Troubleshooting** abaixo.
 
 ---
 

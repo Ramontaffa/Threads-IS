@@ -1,4 +1,5 @@
 #include "GuiManager.h"
+#include "StatusMonitor.h"
 
 #include "imgui.h"
 #include "backends/imgui_impl_glfw.h"
@@ -96,63 +97,218 @@ bool runGui(AudioState* state) {
         ImGui_ImplGlfw_NewFrame();
         ImGui::NewFrame();
 
-        ImGui::SetNextWindowPos(ImVec2(20.0f, 20.0f), ImGuiCond_Once);
-        ImGui::SetNextWindowSize(ImVec2(1140.0f, 680.0f), ImGuiCond_Once);
-        ImGui::Begin("Mixer");
+        // Apply custom style
+        ImGuiStyle& style = ImGui::GetStyle();
+        style.WindowPadding = ImVec2(15.0f, 15.0f);
+        style.FramePadding = ImVec2(8.0f, 6.0f);
+        style.ItemSpacing = ImVec2(10.0f, 10.0f);
+        style.WindowBorderSize = 1.0f;
+        
+        // Custom colors for dark theme
+        ImGuiIO& io = ImGui::GetIO();
+        ImGui::SetNextWindowPos(ImVec2(10.0f, 10.0f), ImGuiCond_Once);
+        ImGui::SetNextWindowSize(ImVec2(1160.0f, 1040.0f), ImGuiCond_Once);
+        
+        ImGui::Begin("Audio Mixer - DJ Interface", nullptr, ImGuiWindowFlags_NoMove | ImGuiWindowFlags_NoResize);
 
+        // Main header
+        ImGui::PushFont(io.Fonts->Fonts[0]);
+        ImGui::Text("AUDIO MIXER - DJ INTERFACE");
+        ImGui::PopFont();
+        ImGui::Separator();
+
+        // Get state values
         const bool isMasterPlaying = state->globalPlay.load(std::memory_order_relaxed);
-        if (ImGui::Button(isMasterPlaying ? "Pause Master" : "Play Master", ImVec2(210.0f, 44.0f))) {
-            state->globalPlay.store(!isMasterPlaying, std::memory_order_relaxed);
-        }
-
-        ImGui::SameLine();
-        if (ImGui::Button("Reset Timeline", ImVec2(210.0f, 44.0f))) {
-            state->currentFrame.store(0, std::memory_order_relaxed);
-        }
-
         const size_t currentFrame = state->currentFrame.load(std::memory_order_relaxed);
         const float progress = (state->totalFrames == 0)
             ? 0.0f
             : static_cast<float>(currentFrame) / static_cast<float>(state->totalFrames);
 
+        // Master controls panel
+        {
+            ImGui::PushStyleColor(ImGuiCol_FrameBg, IM_COL32(30, 30, 35, 255));
+            ImGui::BeginChild("MasterControls", ImVec2(0, 100.0f), true);
+            
+            ImGui::Text("Master Control");
+            ImGui::Spacing();
+            
+            ImGuiIO& io = ImGui::GetIO();
+            
+            // Play/Pause button
+            if (isMasterPlaying) {
+                ImGui::PushStyleColor(ImGuiCol_Button, IM_COL32(60, 180, 100, 255));
+                ImGui::PushStyleColor(ImGuiCol_ButtonHovered, IM_COL32(80, 210, 120, 255));
+            } else {
+                ImGui::PushStyleColor(ImGuiCol_Button, IM_COL32(100, 100, 110, 255));
+                ImGui::PushStyleColor(ImGuiCol_ButtonHovered, IM_COL32(130, 130, 140, 255));
+            }
+            
+            if (ImGui::Button(isMasterPlaying ? "PAUSE" : "PLAY", ImVec2(120.0f, 40.0f))) {
+                state->globalPlay.store(!isMasterPlaying, std::memory_order_relaxed);
+            }
+            ImGui::PopStyleColor(2);
+            
+            ImGui::SameLine();
+            if (ImGui::Button("RESET", ImVec2(120.0f, 40.0f))) {
+                state->currentFrame.store(0, std::memory_order_relaxed);
+            }
+            
+            ImGui::SameLine(400.0f);
+            ImGui::Text("Status: %s", isMasterPlaying ? "PLAYING" : "PAUSED");
+            
+            ImGui::Spacing();
+            ImGui::Text("Time: %zu / %zu frames", currentFrame, state->totalFrames);
+            ImGui::ProgressBar(progress, ImVec2(-FLT_MIN, 20.0f));
+            
+            ImGui::EndChild();
+            ImGui::PopStyleColor();
+        }
+
         ImGui::Spacing();
-        ImGui::Text("Status: %s", isMasterPlaying ? "TOCANDO" : "PAUSADO");
-        ImGui::Text("Frame: %zu / %zu", currentFrame, state->totalFrames);
-        ImGui::ProgressBar(progress, ImVec2(-FLT_MIN, 18.0f));
 
-        ImGui::Spacing();
-        ImGui::Separator();
-        ImGui::Text("Tracks");
-        ImGui::Spacing();
+        // Tabs for Mixer and Status
+        if (ImGui::BeginTabBar("##MainTabs", ImGuiTabBarFlags_None)) {
+            
+            // MIXER TAB
+            if (ImGui::BeginTabItem("Mixer")) {
+                ImGui::Spacing();
+                ImGui::Text("Track Controls");
+                ImGui::Separator();
+                ImGui::Spacing();
 
-        const size_t maxTracksToShow = std::min<size_t>(8, state->tracks.size());
-        for (size_t i = 0; i < maxTracksToShow; ++i) {
-            const bool isTrackPlaying = state->tracks[i].isPlaying.load(std::memory_order_relaxed);
+                const size_t maxTracksToShow = std::min<size_t>(8, state->tracks.size());
+                
+                // Grid layout for tracks
+                for (size_t i = 0; i < maxTracksToShow; ++i) {
+                    const bool isTrackPlaying = state->tracks[i].isPlaying.load(std::memory_order_relaxed);
+                    
+                    if (isTrackPlaying) {
+                        ImGui::PushStyleColor(ImGuiCol_Button, IM_COL32(50, 150, 80, 255));
+                        ImGui::PushStyleColor(ImGuiCol_ButtonHovered, IM_COL32(70, 180, 100, 255));
+                        ImGui::PushStyleColor(ImGuiCol_ButtonActive, IM_COL32(30, 120, 60, 255));
+                    } else {
+                        ImGui::PushStyleColor(ImGuiCol_Button, IM_COL32(60, 60, 70, 255));
+                        ImGui::PushStyleColor(ImGuiCol_ButtonHovered, IM_COL32(80, 80, 90, 255));
+                        ImGui::PushStyleColor(ImGuiCol_ButtonActive, IM_COL32(50, 50, 60, 255));
+                    }
 
-            if (isTrackPlaying) {
-                ImGui::PushStyleColor(ImGuiCol_Button, IM_COL32(40, 160, 80, 255));
-                ImGui::PushStyleColor(ImGuiCol_ButtonHovered, IM_COL32(60, 190, 100, 255));
-                ImGui::PushStyleColor(ImGuiCol_ButtonActive, IM_COL32(30, 130, 65, 255));
+                    const std::string buttonLabel = state->tracks[i].trackName + (isTrackPlaying ? " [ON]" : " [OFF]");
+                    if (ImGui::Button(buttonLabel.c_str(), ImVec2(270.0f, 60.0f))) {
+                        state->tracks[i].isPlaying.store(!isTrackPlaying, std::memory_order_relaxed);
+                    }
+
+                    ImGui::PopStyleColor(3);
+
+                    if ((i % 4) != 3 && i + 1 < maxTracksToShow) {
+                        ImGui::SameLine();
+                    } else {
+                        ImGui::Spacing();
+                    }
+                }
+
+                ImGui::Spacing();
+                ImGui::Separator();
+                ImGui::Text("Active tracks: %zu / %zu", countActiveTracks(state), state->tracks.size());
+                
+                ImGui::EndTabItem();
             }
 
-            const std::string buttonLabel = state->tracks[i].trackName + (isTrackPlaying ? " [ON]" : " [OFF]");
-            if (ImGui::Button(buttonLabel.c_str(), ImVec2(250.0f, 52.0f))) {
-                state->tracks[i].isPlaying.store(!isTrackPlaying, std::memory_order_relaxed);
+            // STATUS PANEL TAB
+            if (ImGui::BeginTabItem("Status Details")) {
+                ImGui::Spacing();
+                
+                bool isPlaying = state->globalPlay.load(std::memory_order_relaxed);
+                size_t currentFrame = state->currentFrame.load(std::memory_order_relaxed);
+                size_t totalFrames = state->totalFrames;
+                uint32_t sampleRate = state->sampleRate;
+
+                // Status info header
+                {
+                    ImGui::PushStyleColor(ImGuiCol_FrameBg, IM_COL32(40, 40, 50, 255));
+                    ImGui::BeginChild("StatusInfo", ImVec2(0, 80.0f), true);
+                    
+                    ImGui::Columns(3, "status_info", false);
+                    ImGui::SetColumnWidth(0, 300.0f);
+                    ImGui::SetColumnWidth(1, 300.0f);
+                    
+                    ImGui::Text("Playback Status");
+                    ImGui::Text("%s", isPlaying ? "PLAYING" : "PAUSED");
+                    ImGui::NextColumn();
+                    
+                    ImGui::Text("Sample Rate");
+                    ImGui::Text("%u Hz", sampleRate);
+                    ImGui::NextColumn();
+                    
+                    ImGui::Text("Asset");
+                    ImGui::Text("%s", state->assetName.c_str());
+                    ImGui::NextColumn();
+                    
+                    ImGui::Columns(1);
+                    
+                    ImGui::EndChild();
+                    ImGui::PopStyleColor();
+                }
+
+                ImGui::Spacing();
+                ImGui::Separator();
+                ImGui::Spacing();
+
+                // Tracks detailed view - Table
+                ImGui::Text("Track Details");
+                ImGui::Spacing();
+                
+                if (ImGui::BeginTable("TracksTable", 4, ImGuiTableFlags_Borders | ImGuiTableFlags_RowBg)) {
+                    ImGui::TableSetupColumn("Track Name", ImGuiTableColumnFlags_WidthFixed, 200.0f);
+                    ImGui::TableSetupColumn("Status", ImGuiTableColumnFlags_WidthFixed, 150.0f);
+                    ImGui::TableSetupColumn("Progress", ImGuiTableColumnFlags_WidthStretch);
+                    ImGui::TableSetupColumn("Time", ImGuiTableColumnFlags_WidthFixed, 100.0f);
+                    ImGui::TableHeadersRow();
+
+                    for (size_t i = 0; i < state->tracks.size(); ++i) {
+                        ImGui::TableNextRow();
+                        
+                        bool trackActive = state->tracks[i].isPlaying.load(std::memory_order_relaxed);
+                        std::string trackName = state->tracks[i].trackName;
+
+                        // Track name
+                        ImGui::TableSetColumnIndex(0);
+                        ImGui::Text("%s", trackName.c_str());
+
+                        // Status
+                        ImGui::TableSetColumnIndex(1);
+                        if (trackActive) {
+                            ImGui::PushStyleColor(ImGuiCol_Text, IM_COL32(80, 200, 100, 255));
+                            ImGui::Text("[+] ACTIVE");
+                            ImGui::PopStyleColor();
+                        } else {
+                            ImGui::PushStyleColor(ImGuiCol_Text, IM_COL32(180, 180, 180, 255));
+                            ImGui::Text("[ ] MUTED");
+                            ImGui::PopStyleColor();
+                        }
+
+                        // Progress bar
+                        ImGui::TableSetColumnIndex(2);
+                        double trackProgress = (totalFrames == 0) ? 0.0 : (100.0 * currentFrame / totalFrames);
+                        ImGui::ProgressBar(static_cast<float>(trackProgress / 100.0), ImVec2(-FLT_MIN, 20.0f));
+
+                        // Time
+                        ImGui::TableSetColumnIndex(3);
+                        std::string currentTime = formatTime(currentFrame, sampleRate);
+                        ImGui::Text("%s", currentTime.c_str());
+                    }
+
+                    ImGui::EndTable();
+                }
+
+                ImGui::EndTabItem();
             }
 
-            if (isTrackPlaying) {
-                ImGui::PopStyleColor(3);
-            }
-
-            if ((i % 4) != 3 && i + 1 < maxTracksToShow) {
-                ImGui::SameLine();
-            }
+            ImGui::EndTabBar();
         }
 
         ImGui::Spacing();
         ImGui::Separator();
-        ImGui::Text("Active tracks: %zu", countActiveTracks(state));
-        ImGui::Text("Atalhos: feche a janela para encerrar o programa.");
+        ImGui::TextDisabled("Tip: Close window to exit the application");
 
         ImGui::End();
 
