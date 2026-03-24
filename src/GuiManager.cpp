@@ -4,7 +4,12 @@
 #include "backends/imgui_impl_glfw.h"
 #include "backends/imgui_impl_opengl3.h"
 
-#include <GL/gl.h>
+#ifdef __APPLE__
+    #include <OpenGL/gl.h>
+#else
+    #include <GL/gl.h>
+#endif
+
 #include <GLFW/glfw3.h>
 
 #include <algorithm>
@@ -34,9 +39,9 @@ bool runGui(AudioState* state) {
         return false;
     }
 
-    const char* glslVersion = "#version 130";
-    glfwWindowHint(GLFW_CONTEXT_VERSION_MAJOR, 3);
-    glfwWindowHint(GLFW_CONTEXT_VERSION_MINOR, 0);
+    const char* glslVersion = "#version 410";
+    glfwWindowHint(GLFW_CONTEXT_VERSION_MAJOR, 4);
+    glfwWindowHint(GLFW_CONTEXT_VERSION_MINOR, 1);
 
     GLFWwindow* window = glfwCreateWindow(1180, 720, "AUDIO-THREADS | DJ Interface", nullptr, nullptr);
     if (window == nullptr) {
