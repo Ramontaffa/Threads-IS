@@ -1,4 +1,5 @@
 #include "GuiManager.h"
+#include "AudioEngine.h"
 #include "StatusMonitor.h"
 
 #include "imgui.h"
@@ -145,12 +146,17 @@ bool runGui(AudioState* state) {
             
             if (ImGui::Button(isMasterPlaying ? "PAUSE" : "PLAY", ImVec2(120.0f, 40.0f))) {
                 state->globalPlay.store(!isMasterPlaying, std::memory_order_relaxed);
+                wakeInstrumentThreads(state);
             }
             ImGui::PopStyleColor(2);
             
             ImGui::SameLine();
             if (ImGui::Button("RESET", ImVec2(120.0f, 40.0f))) {
                 state->currentFrame.store(0, std::memory_order_relaxed);
+                for (auto& track : state->tracks) {
+                    track.currentFrame.store(0, std::memory_order_relaxed);
+                }
+                wakeInstrumentThreads(state);
             }
             
             ImGui::SameLine(400.0f);
@@ -195,6 +201,7 @@ bool runGui(AudioState* state) {
                     const std::string buttonLabel = state->tracks[i].trackName + (isTrackPlaying ? " [ON]" : " [OFF]");
                     if (ImGui::Button(buttonLabel.c_str(), ImVec2(270.0f, 60.0f))) {
                         state->tracks[i].isPlaying.store(!isTrackPlaying, std::memory_order_relaxed);
+                        wakeInstrumentThreads(state);
                     }
 
                     ImGui::PopStyleColor(3);
@@ -325,6 +332,7 @@ bool runGui(AudioState* state) {
     }
 
     state->programRunning.store(false, std::memory_order_relaxed);
+    wakeInstrumentThreads(state);
 
     ImGui_ImplOpenGL3_Shutdown();
     ImGui_ImplGlfw_Shutdown();

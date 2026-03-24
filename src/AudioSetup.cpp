@@ -168,6 +168,8 @@ void audioSetup(AudioState* state) {
         if (decode_mp3_to_pcm(filename, track.pcmData, fileChannels, fileSampleRate)) {
             track.originalSampleRate = fileSampleRate;
             size_t frames = track.pcmData.size() / fileChannels;
+            track.totalFrames = frames;
+            track.currentFrame.store(0, std::memory_order_relaxed);
             double duration = static_cast<double>(frames) / fileSampleRate;
             std::cout << "Sucesso! (" << frames << " frames, " << fileSampleRate << " Hz, " 
                       << duration << "s)\n";
@@ -196,6 +198,8 @@ void audioSetup(AudioState* state) {
         if (track.pcmData.size() < requiredSize) {
             track.pcmData.resize(requiredSize, 0.0f);
         }
+        track.totalFrames = state->totalFrames;
+        track.currentFrame.store(0, std::memory_order_relaxed);
     }
 
     std::cout << "Total de faixas carregadas: " << state->tracks.size() << "\n";

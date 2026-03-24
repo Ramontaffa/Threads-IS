@@ -2,6 +2,9 @@
 #include <vector>
 #include <atomic>
 #include <string>
+#include <thread>
+#include <mutex>
+#include <condition_variable>
 #include <algorithm>
 #include <cctype>
 
@@ -23,6 +26,10 @@ struct Track {
     std::string trackName{"Unknown"};
     // Sample rate original do arquivo MP3
     int originalSampleRate{0};
+    // Quantidade total de frames da faixa
+    size_t totalFrames{0};
+    // Cursor de reprodução da faixa (atualizado pela thread do instrumento)
+    std::atomic<size_t> currentFrame{0};
 
     // 1. Construtor padrão necessário porque vamos criar construtores customizados
     Track() = default;
@@ -33,7 +40,9 @@ struct Track {
         : pcmData(std::move(other.pcmData)), 
           isPlaying(other.isPlaying.load(std::memory_order_relaxed)),
           trackName(std::move(other.trackName)),
-          originalSampleRate(other.originalSampleRate) {
+            originalSampleRate(other.originalSampleRate),
+            totalFrames(other.totalFrames),
+            currentFrame(other.currentFrame.load(std::memory_order_relaxed)) {
     }
 
     // 3. Operador de Atribuição de Movimento (Move Assignment Operator)
@@ -43,6 +52,8 @@ struct Track {
             isPlaying.store(other.isPlaying.load(std::memory_order_relaxed), std::memory_order_relaxed);
             trackName = std::move(other.trackName);
             originalSampleRate = other.originalSampleRate;
+            totalFrames = other.totalFrames;
+            currentFrame.store(other.currentFrame.load(std::memory_order_relaxed), std::memory_order_relaxed);
         }
         return *this;
     }
@@ -71,4 +82,9 @@ struct AudioState {
     int sampleRate{48000};
     // Nome do asset sendo carregado (ex: "Assets" ou "Assets2")
     std::string assetName{"Assets"};
+    // Threads de instrumento (uma por faixa)
+    std::vector<std::thread> instrumentThreads;
+    // Sincronização de play/pause/reset/stop das threads de instrumento
+    std::mutex controlMutex;
+    std::condition_variable controlCv;
 };

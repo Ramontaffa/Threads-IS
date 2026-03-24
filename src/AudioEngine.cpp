@@ -1,11 +1,45 @@
 #include "RtAudio.h"
 #include "AudioState.h"
 #include <iostream>
+#include <chrono>
 
 RtAudio::StreamParameters parameters;
 RtAudio *dac = nullptr;
 unsigned int sampleRate;
 unsigned int bufferSize;
+
+namespace {
+
+void instrumentLoop(AudioState* state, size_t trackIndex) {
+    constexpr auto tick = std::chrono::milliseconds(5);
+
+    while (state->programRunning.load(std::memory_order_relaxed)) {
+        std::unique_lock<std::mutex> lock(state->controlMutex);
+        state->controlCv.wait_for(lock, tick, [&]() {
+            return !state->programRunning.load(std::memory_order_relaxed) ||
+                   (state->globalPlay.load(std::memory_order_relaxed) &&
+                    state->tracks[trackIndex].isPlaying.load(std::memory_order_relaxed));
+        });
+
+        if (!state->programRunning.load(std::memory_order_relaxed)) {
+            break;
+        }
+
+        const bool shouldAdvance = state->globalPlay.load(std::memory_order_relaxed) &&
+                                   state->tracks[trackIndex].isPlaying.load(std::memory_order_relaxed);
+        lock.unlock();
+
+        if (!shouldAdvance) {
+            continue;
+        }
+
+        // A thread do instrumento permanece ativa e sincronizada por eventos.
+        // O avanço de frame fica centralizado na callback de áudio para evitar saltos.
+        (void)trackIndex;
+    }
+}
+
+} // namespace
 
 void rtAudioSetup(AudioState* state) {
     if (state->channels != 2) {
@@ -44,34 +78,36 @@ int mixingCallback(void *outputBuffer, void *inputBuffer, unsigned int nFrames,
         return 1;
     }
 
-    // Itera todos os frames
+    // Itera todos os frames do buffer de áudio
     for (unsigned int i = 0; i < nFrames; i++) {
-        // Preenche com silêncio se mudo ou se a faixa terminou
-        if (!state->globalPlay.load(std::memory_order_relaxed) || 
-            state->currentFrame.load(std::memory_order_relaxed) >= state->totalFrames) {            
+        // Preenche com silêncio se master estiver pausado.
+        if (!state->globalPlay.load(std::memory_order_relaxed)) {
             for (unsigned int c = 0; c < state->channels; c++) {
                 *out++ = 0.0f; 
             }
             continue;
         }
-
-        // Frame atual
-        size_t frameIndex = state->currentFrame.load(std::memory_order_relaxed);
         
         //  Preenche dados dos canais esquerdo e direito
         for (unsigned int c = 0; c < state->channels; c++) {
             // Inicializa com silêncio e sem faixas ativas
             float mixedSample = 0.0f;
             int activeTracks = 0;
-            
-            // Calcula índice do frame correspondente ao canal atual
-            size_t sampleIndex = (frameIndex * state->channels) + c;
 
             // Adiciona frames das faixas que estão ativas
             for (auto& track : state->tracks) {
                 if (track.isPlaying.load(std::memory_order_relaxed)) {
-                    mixedSample += track.pcmData[sampleIndex];
-                    activeTracks++;
+                    const size_t trackTotalFrames = track.totalFrames;
+                    if (trackTotalFrames == 0) {
+                        continue;
+                    }
+
+                    const size_t frameIndex = track.currentFrame.load(std::memory_order_relaxed) % trackTotalFrames;
+                    const size_t sampleIndex = (frameIndex * state->channels) + c;
+                    if (sampleIndex < track.pcmData.size()) {
+                        mixedSample += track.pcmData[sampleIndex];
+                        activeTracks++;
+                    }
                 }
             }
 
@@ -85,8 +121,27 @@ int mixingCallback(void *outputBuffer, void *inputBuffer, unsigned int nFrames,
             *out++ = mixedSample;
         }
 
-        // Incrementa frame na struct 
-        state->currentFrame.fetch_add(1, std::memory_order_relaxed);
+        // Avança os cursores das faixas no mesmo ritmo do callback de áudio.
+        size_t monitorFrame = state->currentFrame.load(std::memory_order_relaxed);
+        bool foundMonitor = false;
+        for (auto& track : state->tracks) {
+            if (!track.isPlaying.load(std::memory_order_relaxed) || track.totalFrames == 0) {
+                continue;
+            }
+
+            const size_t current = track.currentFrame.load(std::memory_order_relaxed);
+            const size_t next = (current + 1) % track.totalFrames;
+            track.currentFrame.store(next, std::memory_order_relaxed);
+
+            if (!foundMonitor) {
+                monitorFrame = next;
+                foundMonitor = true;
+            }
+        }
+
+        if (foundMonitor) {
+            state->currentFrame.store(monitorFrame, std::memory_order_relaxed);
+        }
     }
 
     return 0; // faz RtAudio continuar a rodar a stream
@@ -136,5 +191,44 @@ int stopAudioStream() {
     }
 
     delete dac;
+    dac = nullptr;
     return erro;
+}
+
+int startInstrumentThreads(AudioState* state) {
+    if (state == nullptr) {
+        return 1;
+    }
+
+    state->instrumentThreads.clear();
+    state->instrumentThreads.reserve(state->tracks.size());
+
+    for (size_t i = 0; i < state->tracks.size(); ++i) {
+        state->instrumentThreads.emplace_back(instrumentLoop, state, i);
+    }
+
+    return 0;
+}
+
+void wakeInstrumentThreads(AudioState* state) {
+    if (state == nullptr) {
+        return;
+    }
+    state->controlCv.notify_all();
+}
+
+void stopInstrumentThreads(AudioState* state) {
+    if (state == nullptr) {
+        return;
+    }
+
+    state->programRunning.store(false, std::memory_order_relaxed);
+    state->controlCv.notify_all();
+
+    for (auto& thread : state->instrumentThreads) {
+        if (thread.joinable()) {
+            thread.join();
+        }
+    }
+    state->instrumentThreads.clear();
 }

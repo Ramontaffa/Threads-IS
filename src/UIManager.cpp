@@ -1,4 +1,5 @@
 #include "UIManager.h"
+#include "AudioEngine.h"
 #include <chrono>
 #include <cstdio>
 #include <iostream>
@@ -108,18 +109,24 @@ void uiLoop(AudioState* state) {
 
         if (key == 'q' || key == 'Q') {
             state->programRunning.store(false, std::memory_order_relaxed);
+            wakeInstrumentThreads(state);
             break;
         }
 
         if (key == ' ' || key == 'p' || key == 'P') {
             bool currentPlay = state->globalPlay.load(std::memory_order_relaxed);
             state->globalPlay.store(!currentPlay, std::memory_order_relaxed);
+            wakeInstrumentThreads(state);
             printDashboard(state);
             continue;
         }
 
         if (key == 'r' || key == 'R') {
             state->currentFrame.store(0, std::memory_order_relaxed);
+            for (auto& track : state->tracks) {
+                track.currentFrame.store(0, std::memory_order_relaxed);
+            }
+            wakeInstrumentThreads(state);
             printDashboard(state);
             continue;
         }
@@ -132,6 +139,7 @@ void uiLoop(AudioState* state) {
 
             bool currentStatus = state->tracks[trackIdx].isPlaying.load(std::memory_order_relaxed);
             state->tracks[trackIdx].isPlaying.store(!currentStatus, std::memory_order_relaxed);
+            wakeInstrumentThreads(state);
             printDashboard(state);
             continue;
         }

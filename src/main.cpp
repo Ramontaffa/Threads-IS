@@ -38,6 +38,12 @@ int main() {
         return 1;
     }
 
+    if (startInstrumentThreads(&state) != 0) {
+        std::cout << "Falha ao iniciar threads de instrumentos. Encerrando...\n";
+        stopAudioStream();
+        return 1;
+    }
+
 #ifdef AUDIO_THREADS_ENABLE_GUI
     // GUI em janela como interface principal. Se falhar, usa fallback terminal.
     if (!runGui(&state)) {
@@ -56,6 +62,7 @@ int main() {
 
     // Destrói instância de RtAudio e libera memória
     std::cout << "Encerrando programa..." << std::endl;
+    stopInstrumentThreads(&state);
     if (stopAudioStream()) {
         std::cout << "Erro ao fechar stream\n";
         return 1;
