@@ -12,8 +12,10 @@ void rtAudioSetup(AudioState* state) {
         std::cout << "Erro ao fazer decoding. Faixas devem ser stereo\n";
     }
     state->channels = 2;
-    sampleRate = 48000; // Taxa (em Hz) (192,00 kbit/s)
+    sampleRate = state->sampleRate; // Usa sample rate dos arquivos carregados
     bufferSize = 256;   // Cada buffer terá 256 samples
+
+    std::cout << "Inicializando RtAudio com sample rate: " << sampleRate << " Hz\n";
 
     try {
         dac = new RtAudio();

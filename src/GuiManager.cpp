@@ -120,7 +120,7 @@ bool runGui(AudioState* state) {
                 ImGui::PushStyleColor(ImGuiCol_ButtonActive, IM_COL32(30, 130, 65, 255));
             }
 
-            const std::string buttonLabel = "Track " + std::to_string(i + 1) + (isTrackPlaying ? " [ON]" : " [OFF]");
+            const std::string buttonLabel = state->tracks[i].trackName + (isTrackPlaying ? " [ON]" : " [OFF]");
             if (ImGui::Button(buttonLabel.c_str(), ImVec2(250.0f, 52.0f))) {
                 state->tracks[i].isPlaying.store(!isTrackPlaying, std::memory_order_relaxed);
             }

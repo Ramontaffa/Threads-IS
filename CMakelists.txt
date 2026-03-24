@@ -106,5 +106,5 @@ target_link_libraries(AUDIO-THREADS
 if(AUDIO_THREADS_ENABLE_GUI)
     target_link_libraries(AUDIO-THREADS PRIVATE imgui_lib)
 endif()
-# Copy the assets folder to the build directory during configuration
-file(COPY assets DESTINATION ${CMAKE_CURRENT_BINARY_DIR})
+# Copy the songs folder to the build directory during configuration
+file(COPY songs DESTINATION ${CMAKE_CURRENT_BINARY_DIR})

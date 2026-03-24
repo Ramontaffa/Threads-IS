@@ -71,12 +71,13 @@ void printDashboard(AudioState* state) {
     std::cout << "Master: " << (isGlobalPlay ? "TOCANDO" : "PAUSADO") << "\n";
     std::cout << "Frame atual: "
               << state->currentFrame.load(std::memory_order_relaxed)
-              << " / " << state->totalFrames << "\n\n";
+              << " / " << state->totalFrames << "\n";
+    std::cout << "Assets: " << state->assetName << "\n\n";
 
     std::cout << "Faixas:\n";
     for (size_t i = 0; i < state->tracks.size(); ++i) {
         const bool trackPlaying = state->tracks[i].isPlaying.load(std::memory_order_relaxed);
-        std::cout << "  [" << (i + 1) << "] Track " << (i + 1)
+        std::cout << "  [" << (i + 1) << "] " << state->tracks[i].trackName
                   << " : " << (trackPlaying ? "ON" : "OFF") << "\n";
     }
 

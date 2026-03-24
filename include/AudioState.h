@@ -1,6 +1,17 @@
 #pragma once
 #include <vector>
 #include <atomic>
+#include <string>
+#include <algorithm>
+#include <cctype>
+
+// Função helper para capitalizar string
+inline std::string capitalize(const std::string& str) {
+    if (str.empty()) return str;
+    std::string result = str;
+    result[0] = std::toupper(result[0]);
+    return result;
+}
 
 // Representa faixas (árquivo) de áudio
 struct Track {
@@ -8,6 +19,10 @@ struct Track {
     std::vector<float> pcmData;
     // Representa se a faixa está tocando
     std::atomic<bool> isPlaying{false};
+    // Nome amigável da faixa
+    std::string trackName{"Unknown"};
+    // Sample rate original do arquivo MP3
+    int originalSampleRate{0};
 
     // 1. Construtor padrão necessário porque vamos criar construtores customizados
     Track() = default;
@@ -16,7 +31,9 @@ struct Track {
     // Isso ensina o std::vector como mover uma Track na memória
     Track(Track&& other) noexcept 
         : pcmData(std::move(other.pcmData)), 
-          isPlaying(other.isPlaying.load(std::memory_order_relaxed)) {
+          isPlaying(other.isPlaying.load(std::memory_order_relaxed)),
+          trackName(std::move(other.trackName)),
+          originalSampleRate(other.originalSampleRate) {
     }
 
     // 3. Operador de Atribuição de Movimento (Move Assignment Operator)
@@ -24,6 +41,8 @@ struct Track {
         if (this != &other) {
             pcmData = std::move(other.pcmData);
             isPlaying.store(other.isPlaying.load(std::memory_order_relaxed), std::memory_order_relaxed);
+            trackName = std::move(other.trackName);
+            originalSampleRate = other.originalSampleRate;
         }
         return *this;
     }
@@ -48,4 +67,8 @@ struct AudioState {
     size_t numSamples{0};
     // Quantidade de canais (stereo = 2, esquerda e direita)
     unsigned int channels{2};
+    // Sample rate global do sistema de áudio (48000 Hz típico)
+    int sampleRate{48000};
+    // Nome do asset sendo carregado (ex: "Assets" ou "Assets2")
+    std::string assetName{"Assets"};
 };
