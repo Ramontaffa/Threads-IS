@@ -1,0 +1,1472 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Audio Mixer — Thread Visualizer</title>
+<style>
+  @import url('https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@300;400;500;600;700&family=Inter:wght@300;400;500;600;700&display=swap');
+
+  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+  :root {
+    --bg: #19212f;
+    --surface: #0e1420;
+    --surface2: #141c2e;
+    --border: #1e2d45;
+    --border-bright: #2a3f5e;
+    --text: #e2e8f0;
+    --muted: #64748b;
+    --mono: 'JetBrainsMono Nerd Font Mono', monospace;
+    --sans: 'Roboto', sans-serif;
+    --sans2: 'Agave Nerd Font Mono', sans-serif;
+
+    --main-thread: #3b82f6;
+    --main-glow: rgba(59,130,246,0.3);
+    --audio-thread: #f50b6d;
+    --audio-glow: rgba(245, 11, 97, 0.3);
+    --ui-thread: #10b981;
+    --ui-glow: rgba(16,185,129,0.3);
+
+    --atomic: #462e91;
+    --atomic-glow: rgba(167,139,250,0.25);
+    --fetch: #fb923c;
+    --callback: #f43f5e;
+    --relaxed: #06b6d4;
+    --lockfree: #84cc16;
+  }
+
+  html { scroll-behavior: smooth; }
+
+  body {
+    background: var(--bg);
+    color: var(--text);
+    font-family: var(--sans);
+    min-height: 100vh;
+    overflow-x: hidden;
+  }
+
+  .cp{background:rgba(255,79,96,.14);border:1px solid rgba(255,79,96,.4);color:#ff4f60;animation:pulseDot 2.5s ease infinite;}
+  .ce{background:rgba(45,232,154,.09);border:1px solid rgba(45,232,154,.3);color:#2de89a;animation:pulseDot 2.5s .5s ease infinite;}
+  .corelbl{position:absolute;font-size:9px;font-weight:700;font-family:'JetBrains Mono',monospace;color:var(--muted);}
+
+  /* ── NOISE OVERLAY ── */
+  body::before {
+    content: '';
+    position: fixed;
+    inset: 0;
+    background-image: url("data:image/svg+xml,%3Csvg viewBox='0 0 200 200' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='4' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)' opacity='1'/%3E%3C/svg%3E");
+    opacity: 0.025;
+    pointer-events: none;
+    z-index: 1000;
+  }
+
+  /* ── HEADER ── */
+  header {
+    padding: 48px 40px 32px;
+    border-bottom: 1px solid var(--border);
+    position: relative;
+  }
+  header::after {
+    content: '';
+    position: absolute;
+    bottom: 0; left: 0; right: 0;
+    height: 1px;
+    background: linear-gradient(90deg, transparent, var(--main-thread), var(--audio-thread), var(--ui-thread), transparent);
+    opacity: 0.5;
+  }
+  .header-tag {
+    font-family: var(--mono);
+    font-size: 11px;
+    color: var(--relaxed);
+    letter-spacing: 2px;
+    text-transform: uppercase;
+    margin-bottom: 12px;
+  }
+  h1 {
+    font-size: clamp(22px, 3vw, 38px);
+    font-weight: 700;
+    letter-spacing: -0.5px;
+    line-height: 1.1;
+    margin-bottom: 10px;
+  }
+  h1 span { color: var(--audio-thread); }
+  .header-sub {
+    color: var(--muted);
+    font-size: 14px;
+    font-family: var(--mono);
+    max-width: 600px;
+    line-height: 1.6;
+  }
+
+  /* ── LEGEND ── */
+  .legend {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 10px;
+    padding: 20px 40px;
+    border-bottom: 1px solid var(--border);
+    background: var(--surface);
+  }
+  .badge {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    padding: 4px 10px;
+    border-radius: 20px;
+    font-family: var(--mono);
+    font-size: 11px;
+    font-weight: 600;
+    letter-spacing: 0.5px;
+    border: 1px solid;
+    cursor: default;
+    transition: all 0.2s;
+  }
+  .badge:hover { transform: translateY(-1px); }
+  .badge-dot { width: 7px; height: 7px; border-radius: 50%; }
+
+  .badge-main    { color: var(--main-thread);   border-color: var(--main-thread);   background: var(--main-glow); }
+  .badge-audio   { color: var(--audio-thread);  border-color: var(--audio-thread);  background: var(--audio-glow); }
+  .badge-ui      { color: var(--ui-thread);     border-color: var(--ui-thread);     background: var(--ui-glow); }
+  .badge-atomic  { color: var(--atomic);        border-color: var(--atomic);        background: var(--atomic-glow); }
+  .badge-fetch   { color: var(--fetch);         border-color: var(--fetch);         background: rgba(251,146,60,0.15); }
+  .badge-cb      { color: var(--callback);      border-color: var(--callback);      background: rgba(244,63,94,0.15); }
+  .badge-relaxed { color: var(--relaxed);       border-color: var(--relaxed);       background: rgba(6,182,212,0.1); }
+  .badge-lf      { color: var(--lockfree);      border-color: var(--lockfree);      background: rgba(132,204,22,0.1); }
+  .badge-nomutex { color: #94a3b8;              border-color: #334155;              background: rgba(51,65,85,0.3); text-decoration: line-through; }
+
+  /* ── MAIN LAYOUT ── */
+  main { padding: 40px; max-width: 1400px; margin: 0 auto; }
+  section { margin-bottom: 48px; }
+  .section-title {
+    font-family: var(--mono);
+    font-size: 11px;
+    color: var(--muted);
+    letter-spacing: 2px;
+    text-transform: uppercase;
+    margin-bottom: 20px;
+    display: flex;
+    align-items: center;
+    gap: 10px;
+  }
+  .section-title::after {
+    content: '';
+    flex: 1;
+    height: 1px;
+    background: var(--border);
+  }
+
+  /* ── PROCESS BOX ── */
+  .process-box {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    padding: 28px;
+    position: relative;
+    overflow: hidden;
+  }
+  .process-box::before {
+    content: 'PROCESSO: AUDIO-THREADS';
+    position: absolute;
+    top: 12px; right: 16px;
+    font-family: var(--mono);
+    font-size: 10px;
+    color: var(--muted);
+    letter-spacing: 1.5px;
+  }
+  .process-header {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    margin-bottom: 24px;
+  }
+  .process-icon {
+    width: 36px; height: 36px;
+    background: linear-gradient(135deg, #1e3a5f, #2a4a7f);
+    border: 1px solid var(--border-bright);
+    border-radius: 8px;
+    display: flex; align-items: center; justify-content: center;
+    font-size: 16px;
+  }
+  .process-label {
+    font-family: var(--mono);
+    font-size: 13px;
+    font-weight: 600;
+    color: var(--text);
+  }
+  .process-meta { font-size: 11px; color: var(--muted); margin-top: 2px; }
+
+  /* ── MEMORY MAP ── */
+  .memory-map {
+    background: var(--surface2);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 16px;
+    margin-bottom: 20px;
+  }
+  .memory-title {
+    font-family: var(--mono);
+    font-size: 10px;
+    color: var(--muted);
+    letter-spacing: 1.5px;
+    text-transform: uppercase;
+    margin-bottom: 12px;
+  }
+  .memory-row {
+    display: grid;
+    grid-template-columns: 120px 1fr auto;
+    gap: 8px;
+    align-items: center;
+    padding: 6px 0;
+    border-bottom: 1px solid rgba(255,255,255,0.04);
+    font-family: var(--mono);
+    font-size: 12px;
+  }
+  .memory-row:last-child { border-bottom: none; }
+  .mem-addr { color: var(--muted); font-size: 10px; }
+  .mem-name { color: var(--text); }
+  .mem-type { padding: 2px 7px; border-radius: 4px; font-size: 10px; }
+  .mt-atomic { background: var(--atomic-glow); color: var(--atomic); border: 1px solid var(--atomic); }
+  .mt-static { background: rgba(100,116,139,0.15); color: var(--muted); border: 1px solid #334155; }
+  .mt-vector { background: rgba(6,182,212,0.1); color: var(--relaxed); border: 1px solid var(--relaxed); }
+
+  /* ── THREADS GRID ── */
+  .threads-grid {
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    gap: 16px;
+  }
+  @media (max-width: 900px) { .threads-grid { grid-template-columns: 1fr; } }
+
+  .thread-card {
+    background: var(--surface2);
+    border-radius: 10px;
+    padding: 20px;
+    border: 1px solid var(--border);
+    position: relative;
+    overflow: hidden;
+    transition: border-color 0.3s, box-shadow 0.3s;
+  }
+  .thread-card:hover { box-shadow: 0 0 24px -8px var(--glow); }
+  .thread-card.main-t  { --glow: var(--main-glow);  border-top: 2px solid var(--main-thread); }
+  .thread-card.audio-t { --glow: var(--audio-glow); border-top: 2px solid var(--audio-thread); }
+  .thread-card.ui-t    { --glow: var(--ui-glow);    border-top: 2px solid var(--ui-thread); }
+
+  .thread-card:hover { border-color: var(--border-bright); }
+
+  .thread-tag {
+    font-family: var(--mono);
+    font-size: 10px;
+    letter-spacing: 1.5px;
+    text-transform: uppercase;
+    font-weight: 700;
+    margin-bottom: 10px;
+  }
+  .main-t  .thread-tag { color: var(--main-thread); }
+  .audio-t .thread-tag { color: var(--audio-thread); }
+  .ui-t    .thread-tag { color: var(--ui-thread); }
+
+  .thread-name {
+    font-size: 15px;
+    font-weight: 600;
+    margin-bottom: 6px;
+  }
+  .thread-desc {
+    font-size: 12px;
+    color: var(--muted);
+    line-height: 1.6;
+    margin-bottom: 14px;
+  }
+  .thread-creation {
+    background: rgba(0,0,0,0.3);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    padding: 8px 10px;
+    font-family: var(--mono);
+    font-size: 11px;
+    color: var(--muted);
+    margin-bottom: 12px;
+  }
+  .thread-creation .keyword { color: var(--main-thread); }
+  .thread-creation .fn-name { color: #e2e8f0; }
+  .thread-creation .arg     { color: var(--audio-thread); }
+  .thread-steps { list-style: none; }
+  .thread-steps li {
+    font-size: 12px;
+    color: var(--muted);
+    padding: 4px 0;
+    display: flex;
+    align-items: flex-start;
+    gap: 8px;
+    line-height: 1.5;
+  }
+  .thread-steps li::before {
+    content: '→';
+    color: var(--border-bright);
+    flex-shrink: 0;
+    margin-top: 1px;
+  }
+  .thread-steps li .hl-atomic  { color: var(--atomic); font-family: var(--mono); font-size: 11px; }
+  .thread-steps li .hl-fetch   { color: var(--fetch);  font-family: var(--mono); font-size: 11px; }
+  .thread-steps li .hl-cb      { color: var(--callback); font-family: var(--mono); font-size: 11px; }
+  .thread-steps li .hl-relaxed { color: var(--relaxed); font-family: var(--mono); font-size: 11px; }
+
+  /* ── FLOW DIAGRAM ── */
+  .flow-wrap {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    padding: 28px;
+    overflow-x: auto;
+  }
+  .flow-svg { display: block; min-width: 700px; }
+
+  /* ── AUDIO STATE DETAIL ── */
+  .state-grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 16px;
+  }
+  @media (max-width: 700px) { .state-grid { grid-template-columns: 1fr; } }
+
+  .state-card {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    overflow: hidden;
+  }
+  .state-card-header {
+    background: var(--surface2);
+    padding: 12px 16px;
+    font-family: var(--mono);
+    font-size: 11px;
+    color: var(--muted);
+    letter-spacing: 1px;
+    border-bottom: 1px solid var(--border);
+  }
+  .field-row {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 10px 16px;
+    border-bottom: 1px solid rgba(255,255,255,0.04);
+    gap: 12px;
+  }
+  .field-row:last-child { border-bottom: none; }
+  .field-name {
+    font-family: var(--mono);
+    font-size: 12px;
+    color: var(--text);
+  }
+  .field-type {
+    font-family: var(--mono);
+    font-size: 11px;
+    padding: 2px 8px;
+    border-radius: 4px;
+  }
+  .field-access {
+    font-size: 10px;
+    color: var(--muted);
+    text-align: right;
+    min-width: 80px;
+  }
+
+  /* ─── CODE ─── */
+  .cwrap{background:#030309;border:1px solid var(--border);border-radius:16px;overflow:hidden;width:100%;}
+  .chdr{background:var(--s2); display:flex ;align-items:center; gap:7px;}
+  .dot{width:11px;height:11px;border-radius:50%;}
+  .cbody{padding:1.2rem 1.4rem;font-family:'JetBrains Mono',monospace;font-size:12.5px;line-height:1.85;overflow-x:auto;color:#B8BCD8;}
+  .cm{color:#3a3a62;} .ck{color:#c792ea;} .cs{color:#f07178;} .cf{color:#82aaff;} .cn{color:#f78c6c;} .ct{color:#ffcb6b;}
+
+  /* ── CALLBACK DETAIL ── */
+  .callback-box {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-left: 3px solid var(--callback);
+    border-radius: 10px;
+    overflow: hidden;
+  }
+  .callback-header {
+    background: rgba(244,63,94,0.08);
+    padding: 14px 20px;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    border-bottom: 1px solid var(--border);
+  }
+  .callback-title {
+    font-family: var(--mono);
+    font-size: 13px;
+    font-weight: 600;
+    color: var(--callback);
+  }
+  .callback-timing {
+    font-family: var(--mono);
+    font-size: 11px;
+    color: var(--muted);
+    background: rgba(0,0,0,0.3);
+    padding: 3px 8px;
+    border-radius: 4px;
+  }
+  .code-block {
+    padding: 20px;
+    font-family: var(--mono);
+    font-size: 12px;
+    line-height: 1.9;
+    overflow-x: auto;
+  }
+  .c-comment { color: #475569; }
+  .c-keyword  { color: var(--main-thread); }
+  .c-type     { color: var(--relaxed); }
+  .c-fn       { color: #e2e8f0; }
+  .c-atomic   { color: var(--atomic); font-weight: 600; }
+  .c-fetch    { color: var(--fetch); font-weight: 600; }
+  .c-relaxed  { color: var(--relaxed); }
+  .c-string   { color: var(--lockfree); }
+  .c-num      { color: var(--audio-thread); }
+  .c-tag      { 
+    display: inline-block;
+    background: var(--atomic-glow);
+    border: 1px solid var(--atomic);
+    color: var(--atomic);
+    font-size: 9px;
+    padding: 1px 5px;
+    border-radius: 3px;
+    margin-left: 6px;
+    vertical-align: middle;
+    letter-spacing: 0.5px;
+  }
+  .c-tag.ct-fetch   { background: rgba(251,146,60,0.15); border-color: var(--fetch); color: var(--fetch); }
+  .c-tag.ct-relaxed { background: rgba(6,182,212,0.1); border-color: var(--relaxed); color: var(--relaxed); }
+  .c-tag.ct-lf      { background: rgba(132,204,22,0.1); border-color: var(--lockfree); color: var(--lockfree); }
+
+  /* ── NO MUTEX BOX ── */
+  .mutex-comparison {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 16px;
+  }
+  @media (max-width: 700px) { .mutex-comparison { grid-template-columns: 1fr; } }
+
+  .cmp-card {
+    border-radius: 10px;
+    overflow: hidden;
+    border: 1px solid var(--border);
+  }
+  .cmp-header {
+    padding: 12px 16px;
+    font-family: var(--mono);
+    font-size: 11px;
+    font-weight: 700;
+    letter-spacing: 1px;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+  }
+  .cmp-bad  .cmp-header { background: rgba(244,63,94,0.12); color: var(--callback); border-bottom: 1px solid rgba(244,63,94,0.2); }
+  .cmp-good .cmp-header { background: rgba(132,204,22,0.08); color: var(--lockfree); border-bottom: 1px solid rgba(132,204,22,0.15); }
+  .cmp-bad  { background: rgba(244,63,94,0.04); }
+  .cmp-good { background: rgba(132,204,22,0.04); }
+  .cmp-body { padding: 16px; }
+  .cmp-point {
+    font-size: 12px;
+    color: var(--muted);
+    padding: 5px 0;
+    display: flex;
+    align-items: flex-start;
+    gap: 8px;
+    line-height: 1.5;
+  }
+  .icon-x { color: var(--callback); }
+  .icon-ok { color: var(--lockfree); }
+
+  /* ── SONGS FOLDER ── */
+  .songs-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
+    gap: 12px;
+  }
+  .song-card {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    padding: 16px;
+    transition: border-color 0.2s, transform 0.2s;
+  }
+  .song-card:hover { border-color: var(--border-bright); transform: translateY(-2px); }
+  .song-folder {
+    font-family: var(--mono);
+    font-size: 12px;
+    color: var(--audio-thread);
+    margin-bottom: 10px;
+    display: flex;
+    align-items: center;
+    gap: 6px;
+  }
+  .song-tracks { list-style: none; }
+  .song-tracks li {
+    font-family: var(--mono);
+    font-size: 11px;
+    color: var(--muted);
+    padding: 3px 0;
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    border-bottom: 1px solid rgba(255,255,255,0.04);
+  }
+  .song-tracks li:last-child { border-bottom: none; }
+  .track-dot {
+    width: 5px; height: 5px;
+    border-radius: 50%;
+    flex-shrink: 0;
+  }
+  .td-bass    { background: var(--main-thread); }
+  .td-vocals  { background: var(--callback); }
+  .td-kick    { background: var(--audio-thread); }
+  .td-snare   { background: var(--fetch); }
+  .td-guitar  { background: var(--ui-thread); }
+  .td-other   { background: var(--muted); }
+  .td-hihat   { background: var(--relaxed); }
+  .td-synth   { background: var(--atomic); }
+
+  /* ── ANIMATED TIMELINE ── */
+  .timeline-container {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    padding: 28px;
+    position: relative;
+  }
+  .timeline-track {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    margin-bottom: 14px;
+    position: relative;
+  }
+  .timeline-label {
+    width: 120px;
+    font-family: var(--mono);
+    font-size: 11px;
+    font-weight: 600;
+    flex-shrink: 0;
+    text-align: right;
+  }
+  .tl-main  .timeline-label { color: var(--main-thread); }
+  .tl-audio .timeline-label { color: var(--audio-thread); }
+  .tl-ui    .timeline-label { color: var(--ui-thread); }
+
+  .timeline-bar-wrap {
+    flex: 1;
+    height: 28px;
+    background: rgba(0,0,0,0.3);
+    border-radius: 4px;
+    border: 1px solid var(--border);
+    position: relative;
+    overflow: hidden;
+  }
+  .timeline-segment {
+    position: absolute;
+    height: 100%;
+    border-radius: 3px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-family: var(--mono);
+    font-size: 10px;
+    font-weight: 600;
+    white-space: nowrap;
+    overflow: hidden;
+    padding: 0 6px;
+    transition: opacity 0.3s;
+    cursor: default;
+  }
+  .timeline-segment:hover { filter: brightness(1.2); }
+
+  .seg-setup    { background: rgba(59,130,246,0.5);  border: 1px solid var(--main-thread);  color: #bfdbfe; }
+  .seg-wait     { background: rgba(59,130,246,0.15); border: 1px solid rgba(59,130,246,0.3); color: #93c5fd; }
+  .seg-callback { background: rgba(245,158,11,0.5);  border: 1px solid var(--fetch); color: #fde68a; animation: pulse-seg 2s ease-in-out infinite; }
+  .seg-idle     { background: rgba(245,158,11,0.1);  border: 1px solid rgba(245,158,11,0.2); color: #fcd34d; }
+  .seg-ui       { background: rgba(16,185,129,0.4);  border: 1px solid var(--ui-thread);    color: #a7f3d0; }
+
+  @keyframes pulse-seg {
+    0%, 100% { opacity: 1; }
+    50% { opacity: 0.7; }
+  }
+
+  .timeline-tick {
+    display: flex;
+    margin-left: 132px;
+    gap: 0;
+    margin-bottom: 8px;
+  }
+  .tick {
+    flex: 1;
+    text-align: center;
+    font-family: var(--mono);
+    font-size: 9px;
+    color: var(--muted);
+    border-left: 1px solid var(--border);
+    padding: 2px 0;
+  }
+
+  /* ── ANIMATED PULSE INDICATOR ── */
+  .pulse-indicator {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    font-family: var(--mono);
+    font-size: 10px;
+    color: var(--audio-thread);
+    margin-top: 8px;
+  }
+  .pulse-dot {
+    width: 8px; height: 8px;
+    border-radius: 50%;
+    background: var(--audio-thread);
+    animation: blink 1s step-end infinite;
+  }
+  @keyframes blink {
+    0%, 100% { opacity: 1; }
+    50% { opacity: 0.2; }
+  }
+
+  /* ── MOVE CONSTRUCTOR BOX ── */
+  .detail-box {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    overflow: hidden;
+  }
+  .detail-header {
+    padding: 12px 20px;
+    background: var(--surface2);
+    border-bottom: 1px solid var(--border);
+    font-family: var(--mono);
+    font-size: 12px;
+    font-weight: 600;
+    color: var(--text);
+    display: flex;
+    align-items: center;
+    gap: 8px;
+  }
+
+  /* ── FOOTER ── */
+  footer {
+    margin-top: 60px;
+    padding: 24px 40px;
+    border-top: 1px solid var(--border);
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    font-family: var(--mono);
+    font-size: 11px;
+    color: var(--muted);
+    flex-wrap: wrap;
+    gap: 10px;
+  }
+
+  /* ── INTERACTIVE SIM ── */
+  .sim-wrap {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    overflow: hidden;
+  }
+  .sim-toolbar {
+    background: var(--surface2);
+    border-bottom: 1px solid var(--border);
+    padding: 12px 20px;
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    flex-wrap: wrap;
+  }
+  .sim-btn {
+    background: transparent;
+    border: 1px solid var(--border-bright);
+    color: var(--text);
+    padding: 6px 14px;
+    border-radius: 6px;
+    font-family: var(--mono);
+    font-size: 11px;
+    cursor: pointer;
+    transition: all 0.2s;
+  }
+  .sim-btn:hover { background: var(--border); }
+  .sim-btn.active { background: rgba(245,158,11,0.15); border-color: var(--audio-thread); color: var(--audio-thread); }
+  .sim-btn.play-btn { background: rgba(16,185,129,0.12); border-color: var(--ui-thread); color: var(--ui-thread); }
+  .sim-btn.play-btn:hover { background: rgba(16,185,129,0.2); }
+
+  .sim-body {
+    padding: 24px;
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 20px;
+  }
+  @media (max-width: 700px) { .sim-body { grid-template-columns: 1fr; } }
+
+  .sim-panel { }
+  .sim-panel-title {
+    font-family: var(--mono);
+    font-size: 10px;
+    color: var(--muted);
+    letter-spacing: 1.5px;
+    text-transform: uppercase;
+    margin-bottom: 12px;
+  }
+
+  .track-row {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 8px 0;
+    border-bottom: 1px solid rgba(255,255,255,0.04);
+  }
+  .track-row:last-child { border-bottom: none; }
+  .track-toggle {
+    width: 36px; height: 20px;
+    border-radius: 10px;
+    border: 1px solid var(--border);
+    background: var(--surface2);
+    cursor: pointer;
+    position: relative;
+    transition: all 0.2s;
+    flex-shrink: 0;
+  }
+  .track-toggle.on { background: rgba(16,185,129,0.3); border-color: var(--ui-thread); }
+  .track-toggle::after {
+    content: '';
+    position: absolute;
+    width: 14px; height: 14px;
+    background: var(--muted);
+    border-radius: 50%;
+    top: 2px; left: 2px;
+    transition: all 0.2s;
+  }
+  .track-toggle.on::after { left: 18px; background: var(--ui-thread); }
+
+  .track-name-sim { font-size: 12px; flex: 1; }
+  .track-status {
+    font-family: var(--mono);
+    font-size: 10px;
+    padding: 2px 7px;
+    border-radius: 4px;
+  }
+  .ts-on  { background: rgba(16,185,129,0.15); color: var(--ui-thread); border: 1px solid var(--ui-thread); }
+  .ts-off { background: rgba(100,116,139,0.1); color: var(--muted); border: 1px solid var(--border); }
+
+  .sim-log {
+    background: var(--surface2);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    height: 200px;
+    overflow-y: auto;
+    padding: 12px;
+    font-family: var(--mono);
+    font-size: 11px;
+    line-height: 1.8;
+  }
+  .log-entry { display: flex; gap: 8px; }
+  .log-time { color: var(--muted); flex-shrink: 0; width: 60px; }
+  .log-thread-main  { color: var(--main-thread); flex-shrink: 0; width: 100px; }
+  .log-thread-audio { color: var(--audio-thread); flex-shrink: 0; width: 100px; }
+  .log-thread-ui    { color: var(--ui-thread); flex-shrink: 0; width: 100px; }
+  .log-msg { color: var(--text); }
+  .log-atomic { color: var(--atomic); }
+  .log-fetch  { color: var(--fetch); }
+
+  .atomic-display {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 8px;
+    margin-top: 12px;
+  }
+  .atomic-field {
+    background: var(--surface2);
+    border: 1px solid var(--atomic);
+    border-radius: 6px;
+    padding: 10px 12px;
+  }
+  .af-label { font-family: var(--mono); font-size: 10px; color: var(--muted); margin-bottom: 4px; }
+  .af-value { font-family: var(--mono); font-size: 16px; font-weight: 700; color: var(--atomic); }
+  .af-note  { font-family: var(--mono); font-size: 9px; color: var(--muted); margin-top: 2px; }
+
+  /* scrollbar */
+  ::-webkit-scrollbar { width: 6px; height: 6px; }
+  ::-webkit-scrollbar-track { background: var(--surface); }
+  ::-webkit-scrollbar-thumb { background: var(--border-bright); border-radius: 3px; }
+</style>
+</head>
+<body>
+
+<!-- HEADER -->
+<header>
+  <div class="header-tag">// Infra de Software — Threads &amp; Processos</div>
+  <h1>Audio Mixer <span>Thread Visualizer</span></h1>
+  <p class="header-sub">Fluxo de execução, memória compartilhada e sincronização lock-free do projeto AUDIO-THREADS em C++ | Cesar School</p>
+</header>
+
+<!-- LEGEND -->
+<div class="legend">
+  <span class="badge badge-main"><span class="badge-dot" style="background:var(--main-thread)"></span>Main Thread</span>
+  <span class="badge badge-audio"><span class="badge-dot" style="background:var(--audio-thread)"></span>Audio Callback Thread</span>
+  <span class="badge badge-ui"><span class="badge-dot" style="background:var(--ui-thread)"></span>UI Thread</span>
+  <span class="badge badge-atomic"><span class="badge-dot" style="background:var(--atomic)"></span>std::atomic</span>
+  <span class="badge badge-fetch"><span class="badge-dot" style="background:var(--fetch)"></span>fetch_add</span>
+  <span class="badge badge-cb"><span class="badge-dot" style="background:var(--callback)"></span>Callback</span>
+  <span class="badge badge-relaxed"><span class="badge-dot" style="background:var(--relaxed)"></span>memory_order_relaxed</span>
+  <span class="badge badge-lf"><span class="badge-dot" style="background:var(--lockfree)"></span>lock-free</span>
+  <span class="badge badge-nomutex">mutex ✕ &nbsp; semáforo ✕ &nbsp; lock ✕</span>
+</div>
+
+<main>
+
+  <!-- 1. PASTA SONGS -->
+  <section>
+    <div class="section-title">01 &mdash; pasta songs/ carregada pela main thread</div>
+    <div class="songs-grid">
+      <div class="song-card">
+        <div class="song-folder">
+          <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+  <path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"></path>
+  </svg>billie jean/</div>
+        <ul class="song-tracks">
+          <li><span class="track-dot td-bass"></span>bass.mp3</li>
+          <li><span class="track-dot td-vocals"></span>vocals.mp3</li>
+          <li><span class="track-dot td-kick"></span>kick.mp3</li>
+          <li><span class="track-dot td-other"></span>other drums.mp3</li>
+          <li><span class="track-dot td-guitar"></span>guitar.mp3</li>
+          <li><span class="track-dot td-other"></span>other.mp3</li>
+          <li><span class="track-dot td-snare"></span>snare.mp3</li>
+        </ul>
+      </div>
+      <div class="song-card">
+        <div class="song-folder">
+          <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+  <path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"></path>
+  </svg>dance no more/</div>
+        <ul class="song-tracks">
+          <li><span class="track-dot td-bass"></span>bass.mp3</li>
+          <li><span class="track-dot td-vocals"></span>vocals.mp3</li>
+          <li><span class="track-dot td-kick"></span>kick.mp3</li>
+          <li><span class="track-dot td-other"></span>otherdrums.mp3</li>
+          <li><span class="track-dot td-hihat"></span>hihat.mp3</li>
+          <li><span class="track-dot td-snare"></span>snare.mp3</li>
+          <li><span class="track-dot td-guitar"></span>guitar.mp3</li>
+          <li><span class="track-dot td-other"></span>other.mp3</li>
+        </ul>
+      </div>
+      <div class="song-card">
+        <div class="song-folder">
+          <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+  <path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"></path>
+  </svg>instrumental/</div>
+        <ul class="song-tracks">
+          <li><span class="track-dot td-bass"></span>bass.mp3</li>
+          <li><span class="track-dot td-synth"></span>synth.mp3</li>
+          <li><span class="track-dot td-kick"></span>kick.mp3</li>
+          <li><span class="track-dot td-snare"></span>snare.mp3</li>
+          <li><span class="track-dot td-hihat"></span>hihat.mp3</li>
+          <li><span class="track-dot td-synth"></span>organ lead.mp3</li>
+          <li><span class="track-dot td-other"></span>organ.mp3</li>
+          <li><span class="track-dot td-synth"></span>synth 2.mp3</li>
+        </ul>
+      </div>
+      <div class="song-card">
+        <div class="song-folder">
+          <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+  <path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"></path>
+  </svg>back in black/</div>
+        <ul class="song-tracks">
+          <li><span class="track-dot td-bass"></span>bass.mp3</li>
+          <li><span class="track-dot td-vocals"></span>vocals.mp3</li>
+          <li><span class="track-dot td-kick"></span>kick.mp3</li>
+          <li><span class="track-dot td-hihat"></span>hihat e cymbal.mp3</li>
+          <li><span class="track-dot td-guitar"></span>guitar.mp3</li>
+          <li><span class="track-dot td-other"></span>other.mp3</li>
+          <li><span class="track-dot td-snare"></span>snare.mp3</li>
+        </ul>
+      </div>
+    </div>
+    <p style="font-size:11px;color:var(--muted);margin-top:12px;font-family:var(--mono)">
+      → Cada .mp3 é decodificado pra PCM float pela minimp3 e armazenado em <span style="color:var(--relaxed)">Track.pcmData</span> na heap. Tudo acontece na main thread antes de qualquer outra thread existir.
+    </p>
+  </section>
+
+  <!-- 2. PROCESSO -->
+  <section>
+    <div class="section-title">02 &mdash; processo &amp; memória compartilhada</div>
+    <div class="process-box">
+      <div class="process-header">
+        <div><svg width="40" height="40" viewBox="0 0 40 40" fill="none" style="display:block;margin:auto"><rect width="40" height="40" rx="11" fill="rgba(123,111,255,.1)"/><rect x="10" y="14" width="20" height="16" rx="3" stroke="#7b6fff" stroke-width="1.5"/><rect x="14" y="14" width="12" height="8" rx="1" stroke="#7b6fff" stroke-width="1" opacity=".5"/><path d="M16 10H24" stroke="#7b6fff" stroke-width="1.5" stroke-linecap="round"/><path d="M20 10V14" stroke="#7b6fff" stroke-width="1.5" stroke-linecap="round"/></svg></div>
+        <div>
+          <div class="process-label">Processo: AUDIO-THREADS</div>
+          <div class="process-meta">PID único · espaço de memória próprio · 3 threads internas</div>
+        </div>
+      </div>
+
+      <div class="memory-map">
+        <div class="memory-title">AudioState — memória compartilhada entre todas as threads</div>
+        <div class="memory-row">
+          <span class="mem-addr">0x…a0</span>
+          <span class="mem-name">globalPlay</span>
+          <span class="mem-type mt-atomic">atomic&lt;bool&gt;</span>
+        </div>
+        <div class="memory-row">
+          <span class="mem-addr">0x…a8</span>
+          <span class="mem-name">currentFrame</span>
+          <span class="mem-type mt-atomic">atomic&lt;size_t&gt;</span>
+        </div>
+        <div class="memory-row">
+          <span class="mem-addr">0x…b0</span>
+          <span class="mem-name">programRunning</span>
+          <span class="mem-type mt-atomic">atomic&lt;bool&gt;</span>
+        </div>
+        <div class="memory-row">
+          <span class="mem-addr">0x…b8</span>
+          <span class="mem-name">totalFrames</span>
+          <span class="mem-type mt-static">size_t (read-only)</span>
+        </div>
+        <div class="memory-row">
+          <span class="mem-addr">0x…c0</span>
+          <span class="mem-name">sampleRate</span>
+          <span class="mem-type mt-static">int (read-only)</span>
+        </div>
+        <div class="memory-row">
+          <span class="mem-addr">0x…d0</span>
+          <span class="mem-name">tracks[ ]</span>
+          <span class="mem-type mt-vector">vector&lt;Track&gt;</span>
+        </div>
+        <div class="memory-row" style="padding-left:24px;opacity:0.8">
+          <span class="mem-addr">↳ 0x…e0</span>
+          <span class="mem-name">tracks[i].isPlaying</span>
+          <span class="mem-type mt-atomic">atomic&lt;bool&gt;</span>
+        </div>
+        <div class="memory-row" style="padding-left:24px;opacity:0.8">
+          <span class="mem-addr">↳ 0x…f0</span>
+          <span class="mem-name">tracks[i].pcmData</span>
+          <span class="mem-type mt-static">vector&lt;float&gt; (read-only)</span>
+        </div>
+      </div>
+
+      <p style="font-size:11px;color:var(--muted);font-family:var(--mono);line-height:1.7">
+        Campos <span style="color:var(--atomic)">atomic</span> são modificados em runtime por múltiplas threads. Campos <span style="color:var(--muted)">read-only</span> são escritos uma única vez pela main thread antes das outras threads existirem — por isso não precisam de proteção.
+      </p>
+    </div>
+  </section>
+
+  <!-- 3. THREADS -->
+  <section>
+    <div class="section-title">03 &mdash; as três threads do processo</div>
+    <div class="threads-grid">
+
+      <!-- MAIN -->
+      <div class="thread-card main-t">
+        <div class="thread-tag">Thread 01</div>
+        <div class="thread-name">Main Thread</div>
+        <div class="thread-desc">Criada automaticamente pelo SO quando o processo inicia. Executa o <code style="font-size:11px;color:var(--main-thread)">main()</code> do programa.</div>
+        <div class="thread-creation">
+          <span class="c-comment">// criação automática</span><br>
+          <span class="keyword">int</span> <span class="fn-name">main</span>() { <span class="c-comment">// ← já é uma thread</span> }
+        </div>
+        <ul class="thread-steps">
+          <li>Carrega .mp3 e decodifica pra PCM (AudioSetup)</li>
+          <li>Inicializa <span class="hl-atomic">AudioState</span> com todos os campos</li>
+          <li>Chama <span class="hl-relaxed">rtAudioSetup</span> e <span class="hl-relaxed">startAudioStream</span></li>
+          <li>Cria a UI thread e fica em <span class="hl-atomic">join()</span> esperando ela terminar</li>
+          <li>Após join, finaliza stream e encerra</li>
+        </ul>
+      </div>
+
+      <!-- AUDIO -->
+      <div class="thread-card audio-t">
+        <div class="thread-tag">Thread 02</div>
+        <div class="thread-name">Audio Callback Thread</div>
+        <div class="thread-desc">Criada pelo <strong>sistema operacional</strong> quando RtAudio abre a stream. Não é um <code style="font-size:11px;color:var(--audio-thread)">std::thread</code> — o SO a gerencia.</div>
+        <div class="thread-creation">
+          <span class="c-comment">// RtAudio instrui o SO:</span><br>
+          <span class="fn-name">startAudioStream</span>(<span class="arg">&amp;state</span>);<br>
+          <span class="c-comment">// SO cria thread dedicada</span>
+        </div>
+        <ul class="thread-steps">
+          <li>Acorda a cada ~5ms quando o DAC precisa de dados</li>
+          <li>Lê <span class="hl-atomic">globalPlay.load(</span><span class="hl-relaxed">relaxed</span><span class="hl-atomic">)</span></li>
+          <li>Lê <span class="hl-atomic">tracks[i].isPlaying.load(</span><span class="hl-relaxed">relaxed</span><span class="hl-atomic">)</span></li>
+          <li>Mistura samples das faixas ativas no buffer</li>
+          <li>Executa <span class="hl-fetch">currentFrame.fetch_add(1, relaxed)</span></li>
+          <li><strong>Nunca bloqueia</strong> — qualquer bloqueio = glitch de áudio</li>
+        </ul>
+        <div class="pulse-indicator">
+          <div class="pulse-dot"></div>
+          executando a cada ~5.8ms @ 44100Hz / buffer 256
+        </div>
+      </div>
+
+      <!-- UI -->
+      <div class="thread-card ui-t">
+        <div class="thread-tag">Thread 03</div>
+        <div class="thread-name">UI Thread</div>
+        <div class="thread-desc">No modo terminal: criada com <code style="font-size:11px;color:var(--ui-thread)">std::thread</code>. No modo GUI: loop roda na própria main thread via <code style="font-size:11px;color:var(--ui-thread)">runGui()</code>.</div>
+        <div class="thread-creation">
+          <span class="c-comment">// modo terminal:</span><br>
+          <span class="keyword">std::thread</span> <span class="fn-name">uiThread</span>(<span class="arg">uiLoop, &amp;state</span>);<br>
+          <span class="fn-name">uiThread</span>.join();
+        </div>
+        <ul class="thread-steps">
+          <li>Lê input do usuário (teclado ou ImGui)</li>
+          <li>PLAY/PAUSE: <span class="hl-atomic">globalPlay.store(</span><span class="hl-relaxed">!val, relaxed</span><span class="hl-atomic">)</span></li>
+          <li>Toggle faixa: <span class="hl-atomic">isPlaying.store(</span><span class="hl-relaxed">!val, relaxed</span><span class="hl-atomic">)</span></li>
+          <li>RESET: <span class="hl-atomic">currentFrame.store(</span><span class="hl-relaxed">0, relaxed</span><span class="hl-atomic">)</span></li>
+          <li>Lê <span class="hl-atomic">currentFrame.load</span> pra exibir progresso</li>
+          <li>Ao sair: <span class="hl-atomic">programRunning.store(false)</span></li>
+        </ul>
+      </div>
+
+    </div>
+  </section>
+
+  <!-- 4. TIMELINE -->
+  <section>
+    <div class="section-title">04 &mdash; timeline de execução</div>
+    <div class="timeline-container">
+      <div class="timeline-tick">
+        <div class="tick">startup</div>
+        <div class="tick">load</div>
+        <div class="tick">stream</div>
+        <div class="tick">t+1s</div>
+        <div class="tick">t+2s</div>
+        <div class="tick">t+3s</div>
+        <div class="tick">t+4s</div>
+        <div class="tick">exit</div>
+      </div>
+
+      <div class="timeline-track tl-main">
+        <div class="timeline-label">main thread</div>
+        <div class="timeline-bar-wrap">
+          <div class="timeline-segment seg-setup"  style="left:0%;    width:30%">setup &amp; load</div>
+          <div class="timeline-segment seg-wait"   style="left:30%;   width:57.5%">join() — aguarda UI</div>
+          <div class="timeline-segment seg-setup"  style="left:87.5%; width:12.5%">cleanup</div>
+        </div>
+      </div>
+
+      <div class="timeline-track tl-audio" style="margin-top:4px">
+        <div class="timeline-label">audio thread</div>
+        <div class="timeline-bar-wrap">
+          <div class="timeline-segment seg-idle"     style="left:0%;   width:30%">aguardando stream</div>
+          <div class="timeline-segment seg-callback" style="left:30%;  width:57.5%">callback a cada ~5ms ↻</div>
+          <div class="timeline-segment seg-idle"     style="left:87.5%;width:12.5%">stop</div>
+        </div>
+      </div>
+
+      <div class="timeline-track tl-ui" style="margin-top:4px">
+        <div class="timeline-label">ui thread</div>
+        <div class="timeline-bar-wrap">
+          <div class="timeline-segment seg-idle" style="left:0%;   width:30%">não existe ainda</div>
+          <div class="timeline-segment seg-ui"   style="left:30%;  width:57.5%">loop de interface ativo</div>
+          <div class="timeline-segment seg-idle" style="left:87.5%;width:12.5%">joined</div>
+        </div>
+      </div>
+
+      <p style="margin-top:16px;font-size:11px;color:var(--muted);font-family:var(--mono);line-height:1.7">
+        As três threads existem simultaneamente durante o uso do mixer. Não há coordenação direta entre elas — a comunicação toda passa pelos campos <span style="color:var(--atomic)">atomic</span> do AudioState.
+      </p>
+    </div>
+  </section>
+
+  <!-- 5. CALLBACK CODE -->
+<section>
+  <div class="section-title">05 &mdash; mixingCallback — coração da audio thread</div>
+  <div class="callback-box">
+    <div class="callback-header">
+      <div class="chdr"><div class="dot" style="background:#ff4f60"></div><div class="dot" style="background:#ffb340"></div><div class="dot" style="background:#2de89a"></div><span class="callback-title" style="margin-left: 8px;">mixingCallback — AudioEngine.cpp</span></div>
+      <span class="callback-timing">⏱ executado a cada ~5ms pelo SO</span>
+    </div>
+    <pre class="code-block">
+<span class="c-type">int</span> <span class="c-fn">mixingCallback</span>(<span class="c-type">void*</span> outputBuffer, <span class="c-type">void*</span> inputBuffer,
+    <span class="c-type">unsigned int</span> nFrames, ..., <span class="c-type">void*</span> userData) {
+    <span class="c-type">float*</span> out = <span class="c-keyword">static_cast</span>&lt;<span class="c-type">float*</span>&gt;(outputBuffer);
+    <span class="c-type">AudioState*</span> state = <span class="c-keyword">static_cast</span>&lt;<span class="c-type">AudioState*</span>&gt;(userData);
+
+    <span class="c-keyword">for</span> (<span class="c-type">unsigned int</span> i = <span class="c-num">0</span>; i &lt; nFrames; i++) {
+        <span class="c-comment">// ↓ leitura atômica — sem bloqueio</span>
+        <span class="c-keyword">if</span> (!state-&gt;<span class="c-atomic">globalPlay</span>.<span class="c-atomic">load</span>(<span class="c-relaxed">memory_order_relaxed</span>)) {<span class="c-tag ct-relaxed">relaxed</span>
+            *out++ = <span class="c-num">0.0f</span>; <span class="c-comment">// silêncio</span>
+            <span class="c-keyword">continue</span>;
+        }
+
+        <span class="c-type">size_t</span> frameIndex = state-&gt;<span class="c-atomic">currentFrame</span>.<span class="c-atomic">load</span>(<span class="c-relaxed">memory_order_relaxed</span>);<span class="c-tag ct-relaxed">relaxed</span>
+
+        <span class="c-keyword">for</span> (<span class="c-type">unsigned int</span> c = <span class="c-num">0</span>; c &lt; state-&gt;channels; c++) {
+            <span class="c-type">float</span> mixedSample = <span class="c-num">0.0f</span>;
+            <span class="c-type">int</span> activeTracks = <span class="c-num">0</span>;
+
+            <span class="c-keyword">for</span> (<span class="c-keyword">auto</span>&amp; track : state-&gt;tracks) {
+                <span class="c-comment">// ↓ cada faixa tem seu próprio atomic</span>
+                <span class="c-keyword">if</span> (track.<span class="c-atomic">isPlaying</span>.<span class="c-atomic">load</span>(<span class="c-relaxed">memory_order_relaxed</span>)) {<span class="c-tag ct-relaxed">relaxed</span>
+                    mixedSample += track.pcmData[frameIndex * channels + c];
+                    activeTracks++;
+                }
+            }
+
+            <span class="c-keyword">if</span> (activeTracks &gt; <span class="c-num">1</span>)
+                mixedSample /= (<span class="c-type">float</span>)activeTracks;
+            *out++ = mixedSample;
+        }
+
+        <span class="c-comment">// ↓ operação atômica de incremento — indivisível no hardware</span>
+        state-&gt;<span class="c-fetch">currentFrame</span>.<span class="c-fetch">fetch_add</span>(<span class="c-num">1</span>, <span class="c-relaxed">memory_order_relaxed</span>);<span class="c-tag ct-fetch">fetch_add</span><span class="c-tag ct-relaxed">relaxed</span>
+    }
+
+    <span class="c-keyword">return</span> <span class="c-num">0</span>; <span class="c-comment">// sinaliza RtAudio pra continuar</span>
+}
+    </pre>
+  </div>
+</section>
+
+  <!-- 6. MUTEX COMPARISON -->
+  <section>
+    <div class="section-title">06 &mdash; por que não há mutex, semáforo ou lock</div>
+    <div class="mutex-comparison">
+      <div class="cmp-card cmp-bad">
+        <div class="cmp-header">ⓧ&nbsp;COM MUTEX — não usado aqui</div>
+        <div class="cmp-body">
+          <div style="background:rgba(0,0,0,0.3);border:1px solid rgba(244,63,94,0.2);border-radius:6px;padding:12px;font-family:var(--mono);font-size:11px;color:#94a3b8;margin-bottom:14px;line-height:1.9">
+            <span style="color:#475569">// hipotético</span><br>
+            audioMutex.<span style="color:var(--callback)">lock</span>();<span style="color:var(--callback)">  ← pode bloquear!</span><br>
+            <span style="color:#475569">// ... mixar áudio ...</span><br>
+            audioMutex.<span style="color:var(--callback)">unlock</span>();
+          </div>
+          <div class="cmp-point"><span class="icon-x">✗</span> Thread de áudio fica bloqueada esperando a UI soltar o mutex</div>
+          <div class="cmp-point"><span class="icon-x">✗</span> Bloqueio de 10ms = 440 samples perdidos @ 44100 Hz</div>
+          <div class="cmp-point"><span class="icon-x">✗</span> Resultado: click, pop, ou silêncio no áudio</div>
+          <div class="cmp-point"><span class="icon-x">✗</span> Jitter imprevisível — depende do scheduler do SO</div>
+        </div>
+      </div>
+      <div class="cmp-card cmp-good">
+        <div class="cmp-header">✓ &nbsp;COM ATOMIC — lock-free — usado aqui</div>
+        <div class="cmp-body">
+          <div style="background:rgba(0,0,0,0.3);border:1px solid rgba(132,204,22,0.2);border-radius:6px;padding:12px;font-family:var(--mono);font-size:11px;color:#94a3b8;margin-bottom:14px;line-height:1.9">
+            <span style="color:#475569">// sem lock, sem espera</span><br>
+            <span style="color:var(--atomic)">globalPlay</span>.<span style="color:var(--lockfree)">load</span>(<span style="color:var(--relaxed)">relaxed</span>); <span style="color:#475569">// instantâneo</span><br>
+            <span style="color:var(--fetch)">currentFrame</span>.<span style="color:var(--fetch)">fetch_add</span>(<span style="color:var(--audio-thread)">1</span>, <span style="color:var(--relaxed)">relaxed</span>);
+          </div>
+          <div class="cmp-point"><span class="icon-ok">✓</span> Operação executada diretamente pelo processador (instrução LOCK x86)</div>
+          <div class="cmp-point"><span class="icon-ok">✓</span> Nenhuma thread fica parada esperando outra</div>
+          <div class="cmp-point"><span class="icon-ok">✓</span> <code style="font-size:11px">memory_order_relaxed</code>: atômico + mais rápido possível</div>
+          <div class="cmp-point"><span class="icon-ok">✓</span> Seguro aqui porque UI e callback são independentes entre si</div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- 7. AUDIOSTATE FIELDS -->
+  <section>
+    <div class="section-title">07 &mdash; AudioState — quem lê e quem escreve cada campo</div>
+    <div class="state-grid">
+      <div class="state-card">
+        <div class="state-card-header">campos atômicos — modificados em runtime</div>
+        <div class="field-row">
+          <span class="field-name">globalPlay</span>
+          <span class="field-type mt-atomic">atomic&lt;bool&gt;</span>
+          <span class="field-access" style="color:var(--ui-thread)">UI escreve</span>
+        </div>
+        <div class="field-row">
+          <span class="field-name">globalPlay</span>
+          <span class="field-type mt-atomic">atomic&lt;bool&gt;</span>
+          <span class="field-access" style="color:var(--audio-thread)">audio lê</span>
+        </div>
+        <div class="field-row">
+          <span class="field-name">currentFrame</span>
+          <span class="field-type mt-atomic">atomic&lt;size_t&gt;</span>
+          <span class="field-access" style="color:var(--audio-thread)">audio fetch_add</span>
+        </div>
+        <div class="field-row">
+          <span class="field-name">currentFrame</span>
+          <span class="field-type mt-atomic">atomic&lt;size_t&gt;</span>
+          <span class="field-access" style="color:var(--ui-thread)">UI lê (display)</span>
+        </div>
+        <div class="field-row">
+          <span class="field-name">tracks[i].isPlaying</span>
+          <span class="field-type mt-atomic">atomic&lt;bool&gt;</span>
+          <span class="field-access" style="color:var(--ui-thread)">UI escreve</span>
+        </div>
+        <div class="field-row">
+          <span class="field-name">tracks[i].isPlaying</span>
+          <span class="field-type mt-atomic">atomic&lt;bool&gt;</span>
+          <span class="field-access" style="color:var(--audio-thread)">audio lê</span>
+        </div>
+        <div class="field-row">
+          <span class="field-name">programRunning</span>
+          <span class="field-type mt-atomic">atomic&lt;bool&gt;</span>
+          <span class="field-access" style="color:var(--ui-thread)">UI store(false)</span>
+        </div>
+      </div>
+      <div class="state-card">
+        <div class="state-card-header">campos read-only — escritos uma vez pela main thread</div>
+        <div class="field-row">
+          <span class="field-name">totalFrames</span>
+          <span class="field-type mt-static">size_t</span>
+          <span class="field-access" style="font-family: var(--sans);">sem proteção necessária</span>
+        </div>
+        <div class="field-row">
+          <span class="field-name">sampleRate</span>
+          <span class="field-type mt-static">int</span>
+          <span class="field-access">sem proteção necessária</span>
+        </div>
+        <div class="field-row">
+          <span class="field-name">channels</span>
+          <span class="field-type mt-static">unsigned int</span>
+          <span class="field-access">sem proteção necessária</span>
+        </div>
+        <div class="field-row">
+          <span class="field-name">tracks[i].pcmData</span>
+          <span class="field-type mt-vector">vector&lt;float&gt;</span>
+          <span class="field-access">sem proteção necessária</span>
+        </div>
+        <div class="field-row">
+          <span class="field-name">tracks[i].trackName</span>
+          <span class="field-type mt-static">string</span>
+          <span class="field-access">sem proteção necessária</span>
+        </div>
+        <div class="field-row" style="background:rgba(132,204,22,0.04);border-left:2px solid var(--lockfree)">
+          <span class="field-name" style="font-size:11px;color:var(--muted)">Múltiplas threads podem ler simultaneamente sem lock — só há race condition quando há escrita concorrente</span>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- 8. MOVE CONSTRUCTOR -->
+  <section>
+    <div class="section-title">08 &mdash; detalhe técnico — move constructor em Track</div>
+    <div class="detail-box">
+      <div class="detail-header">
+        <div class="chdr"><div class="dot" style="background:#ff4f60"></div><div class="dot" style="background:#ffb340"></div><div class="dot" style="background:#2de89a"></div>
+      </div>
+      <span style="font-size:12px;color:var(--text);font-family:var(--mono);line-height:1.7; margin-left: 8px;">include/AudioState.h — Track não é copiável porque std::atomic não é copiável</span>
+
+      </div>
+      <pre class="code-block">
+<span class="c-comment">// ✓ Move constructor — ensina o vector como mover Track na memória</span>
+<span class="c-fn">Track</span>(<span class="c-type">Track</span>&amp;&amp; other) noexcept
+    : pcmData(std::move(other.pcmData)),
+      <span class="c-atomic">isPlaying</span>(other.<span class="c-atomic">isPlaying</span>.<span class="c-atomic">load</span>(<span class="c-relaxed">memory_order_relaxed</span>)),
+      trackName(std::move(other.trackName)),
+      originalSampleRate(other.originalSampleRate) { }
+
+<span class="c-comment">// ✗ Cópia deletada — std::atomic não permite cópia</span>
+<span class="c-fn">Track</span>(<span class="c-keyword">const</span> <span class="c-type">Track</span>&amp;) = <span class="c-keyword">delete</span>;
+<span class="c-type">Track</span>&amp; <span class="c-keyword">operator</span>=(<span class="c-keyword">const</span> <span class="c-type">Track</span>&amp;) = <span class="c-keyword">delete</span>;
+
+<span class="c-comment">// Sem isso: vector&lt;Track&gt; não compila — realloc precisa mover elementos</span>
+</pre>
+      </div>
+    </div>
+  </section>
+
+  <!-- 9. SIMULAÇÃO INTERATIVA -->
+  <section>
+    <div class="section-title">09 &mdash; simulação interativa — mixer em ação</div>
+    <div class="sim-wrap">
+      <div class="sim-toolbar">
+        <button class="sim-btn play-btn" id="btnPlay" onclick="togglePlay()">▶ PLAY</button>
+        <button class="sim-btn" onclick="resetFrame()">↺ RESET</button>
+        <button class="sim-btn" onclick="clearLog()">⌫ limpar log</button>
+        <span style="font-family:var(--mono);font-size:11px;color:var(--muted);margin-left:auto">
+          Clique nos toggles para mutar/desmutar faixas
+        </span>
+      </div>
+      <div class="sim-body">
+        <div class="sim-panel">
+          <div class="sim-panel-title">faixas — UI thread controla</div>
+          <div id="trackList"></div>
+
+          <div style="margin-top:20px">
+            <div class="sim-panel-title">atomics — estado compartilhado</div>
+            <div class="atomic-display">
+              <div class="atomic-field">
+                <div class="af-label">globalPlay</div>
+                <div class="af-value" id="dispPlay">false</div>
+                <div class="af-note">atomic&lt;bool&gt;</div>
+              </div>
+              <div class="atomic-field">
+                <div class="af-label">currentFrame</div>
+                <div class="af-value" id="dispFrame">0</div>
+                <div class="af-note">fetch_add(1, relaxed)</div>
+              </div>
+              <div class="atomic-field">
+                <div class="af-label">activeTracks</div>
+                <div class="af-value" id="dispActive">0</div>
+                <div class="af-note">calculado no callback</div>
+              </div>
+              <div class="atomic-field">
+                <div class="af-label">programRunning</div>
+                <div class="af-value" id="dispRunning">true</div>
+                <div class="af-note">atomic&lt;bool&gt;</div>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <div class="sim-panel">
+          <div class="sim-panel-title">log de threads</div>
+          <div class="sim-log" id="simLog"></div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+</main>
+
+<footer>
+  <span></span>
+  <span>Cesar School · Infraestrutura de Software</span>
+</footer>
+
+<script>
+  // ── SIMULATION STATE ──
+  const tracks = [
+    { name: 'Bass',    on: false, dot: 'td-bass' },
+    { name: 'Vocals',  on: false, dot: 'td-vocals' },
+    { name: 'Kick',    on: false, dot: 'td-kick' },
+    { name: 'Snare',   on: false, dot: 'td-snare' },
+    { name: 'Guitar',  on: false, dot: 'td-guitar' },
+    { name: 'HiHat',   on: false, dot: 'td-hihat' },
+    { name: 'Other',   on: false, dot: 'td-other' },
+  ];
+
+  let globalPlay = false;
+  let currentFrame = 0;
+  let callbackInterval = null;
+  let simTime = 0;
+
+  // ── BUILD TRACK LIST ──
+  function buildTracks() {
+    const list = document.getElementById('trackList');
+    list.innerHTML = '';
+    tracks.forEach((t, i) => {
+      const row = document.createElement('div');
+      row.className = 'track-row';
+      row.innerHTML = `
+        <div class="track-toggle ${t.on ? 'on' : ''}" id="toggle-${i}" onclick="toggleTrack(${i})"></div>
+        <span class="track-name-sim">${t.name}</span>
+        <span class="track-status ${t.on ? 'ts-on' : 'ts-off'}" id="status-${i}">${t.on ? 'ON' : 'OFF'}</span>
+      `;
+      list.appendChild(row);
+    });
+  }
+
+  function toggleTrack(i) {
+    tracks[i].on = !tracks[i].on;
+    const tog = document.getElementById(`toggle-${i}`);
+    const sta = document.getElementById(`status-${i}`);
+    tog.classList.toggle('on', tracks[i].on);
+    sta.className = `track-status ${tracks[i].on ? 'ts-on' : 'ts-off'}`;
+    sta.textContent = tracks[i].on ? 'ON' : 'OFF';
+
+    const active = tracks.filter(t => t.on).length;
+    addLog('ui', `isPlaying[${i}].store(${tracks[i].on}, relaxed)`, 'atomic');
+    updateDisplays();
+  }
+
+  function togglePlay() {
+    globalPlay = !globalPlay;
+    const btn = document.getElementById('btnPlay');
+    btn.textContent = globalPlay ? '⏸ PAUSE' : '▶ PLAY';
+    btn.style.background = globalPlay ? 'rgba(244,63,94,0.15)' : 'rgba(16,185,129,0.12)';
+    btn.style.borderColor = globalPlay ? 'var(--callback)' : 'var(--ui-thread)';
+    btn.style.color = globalPlay ? 'var(--callback)' : 'var(--ui-thread)';
+
+    addLog('ui', `globalPlay.store(${globalPlay}, relaxed)`, 'atomic');
+
+    if (globalPlay) {
+      startCallback();
+    } else {
+      stopCallback();
+    }
+    updateDisplays();
+  }
+
+  function resetFrame() {
+    currentFrame = 0;
+    addLog('ui', 'currentFrame.store(0, relaxed)', 'atomic');
+    updateDisplays();
+  }
+
+  function clearLog() {
+    document.getElementById('simLog').innerHTML = '';
+    simTime = 0;
+  }
+
+  // ── CALLBACK SIMULATION ──
+  function startCallback() {
+    if (callbackInterval) return;
+    callbackInterval = setInterval(() => {
+      if (!globalPlay) { stopCallback(); return; }
+
+      const active = tracks.filter(t => t.on).length;
+      currentFrame += 256;
+
+      if (active > 0) {
+        const names = tracks.filter(t => t.on).map(t => t.name).join('+');
+        addLog('audio', `fetch_add(256, relaxed) → frame=${currentFrame} | mixing: ${names}`, 'fetch');
+      } else {
+        addLog('audio', `fetch_add(256, relaxed) → frame=${currentFrame} | silêncio (0 tracks)`, null);
+      }
+
+      updateDisplays();
+    }, 600);
+  }
+
+  function stopCallback() {
+    if (callbackInterval) { clearInterval(callbackInterval); callbackInterval = null; }
+  }
+
+  // ── LOG ──
+  let logCounter = 0;
+  function addLog(thread, msg, tag) {
+    logCounter++;
+    const log = document.getElementById('simLog');
+    const t = (logCounter * 5.8).toFixed(1);
+    const entry = document.createElement('div');
+    entry.className = 'log-entry';
+
+    let threadClass = `log-thread-${thread}`;
+    let threadLabel = thread === 'ui' ? '[ui thread]   ' : '[audio thread]';
+
+    let msgHtml = msg;
+    if (tag === 'atomic') {
+      msgHtml = msg.replace(/(\.store|\.load|\.fetch_add)/g, '<span class="log-atomic">$1</span>');
+    } else if (tag === 'fetch') {
+      msgHtml = msg.replace(/(fetch_add)/g, '<span class="log-fetch">$1</span>');
+    }
+
+    entry.innerHTML = `
+      <span class="log-time">${t}ms</span>
+      <span class="${threadClass}">${threadLabel}</span>
+      <span class="log-msg">${msgHtml}</span>
+    `;
+    log.appendChild(entry);
+    log.scrollTop = log.scrollHeight;
+  }
+
+  function updateDisplays() {
+    document.getElementById('dispPlay').textContent = String(globalPlay);
+    document.getElementById('dispPlay').style.color = globalPlay ? 'var(--ui-thread)' : 'var(--callback)';
+    document.getElementById('dispFrame').textContent = currentFrame.toLocaleString();
+    document.getElementById('dispActive').textContent = tracks.filter(t => t.on).length;
+    document.getElementById('dispRunning').textContent = 'true';
+  }
+
+  // ── INIT ──
+  buildTracks();
+  addLog('main', 'audioSetup() — carregando MP3s e decodificando pra PCM', null);
+  setTimeout(() => addLog('main', 'rtAudioSetup() — inicializando RtAudio', null), 300);
+  setTimeout(() => addLog('main', 'startAudioStream() — SO cria audio thread dedicada', null), 600);
+  setTimeout(() => addLog('main', 'std::thread uiThread(uiLoop, &state) — criando UI thread', null), 900);
+  setTimeout(() => addLog('main', 'uiThread.join() — main aguarda UI terminar', null), 1200);
+  setTimeout(() => addLog('audio', 'aguardando DAC precisar de dados... (globalPlay = false)', null), 1500);
+</script>
+
+</body>
+</html>
